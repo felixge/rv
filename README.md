@@ -40,6 +40,17 @@ rv opens a browser and serves a read-only review UI on localhost. Refresh the
 page when you want to load new repository changes; nothing is written back to
 the repository.
 
+Open directly on uncommitted changes, a single commit, or a commit range:
+
+```sh
+rv --working              # uncommitted changes
+rv --commit HEAD          # a single commit
+rv --range main..HEAD     # a commit range
+```
+
+`--commit` and `--range` accept anything Git understands (branch, tag, short or
+full hash). The three options are mutually exclusive.
+
 Use `rv --help` for directory, port, host, and browser options.
 
 ## Development

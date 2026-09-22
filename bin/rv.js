@@ -11,16 +11,37 @@ try {
       port: { type: "string" },
       host: { type: "string", default: "127.0.0.1" },
       "no-open": { type: "boolean" },
+      working: { type: "boolean" },
+      commit: { type: "string" },
+      range: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) {
     console.log(
-      "Usage: rv [directory] [--port 4444] [--no-open]\n\nReview the current repository in your browser. Refresh the page to see new changes.\nIf the default port 4444 is busy, a free port is picked automatically.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.",
+      "Usage: rv [directory] [--working | --commit <ref> | --range <from>..<to>]\n       [--port 4444] [--no-open]\n\nReview the current repository in your browser. Refresh the page to see new changes.\nIf the default port 4444 is busy, a free port is picked automatically.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.\n\nOpen on a specific review view:\n  --working             Uncommitted changes\n  --commit <ref>        A single commit, e.g. --commit HEAD\n  --range <from>..<to>  A commit range, e.g. --range main..HEAD",
     );
   } else {
     if (positionals.length > 1)
       throw new Error("Expected at most one directory.");
+    const views = [
+      values.working && "working",
+      values.commit && "commit",
+      values.range && "range",
+    ].filter(Boolean);
+    if (views.length > 1)
+      throw new Error("Use only one of --working, --commit or --range.");
+    let view = "";
+    if (values.working) {
+      view = "?mode=working";
+    } else if (values.commit) {
+      view = `?mode=commit&to=${encodeURIComponent(values.commit)}`;
+    } else if (values.range) {
+      const [from, to] = values.range.split("..");
+      if (!from || !to || to.includes(".."))
+        throw new Error("Use --range <from>..<to>, e.g. --range main..HEAD.");
+      view = `?mode=range&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    }
     const explicitPort = values.port === undefined ? null : Number(values.port);
     if (
       explicitPort !== null &&
@@ -44,7 +65,7 @@ try {
       process.exitCode = 1;
     });
     server.listen(port, values.host, () => {
-      const url = `http://localhost:${server.address().port}`;
+      const url = `http://localhost:${server.address().port}${view}`;
       console.log(
         `\n  rv → ${url}\n  ${repo.root}\n\n  Refresh the page to update. Ctrl+C to stop.\n`,
       );

@@ -343,6 +343,23 @@ function readView(info: Info) {
   } catch {
     // Missing, obsolete or malformed browser state falls back to current defaults.
   }
+  // CLI options arrive as query params and override the saved view on first load.
+  const params = new URLSearchParams(location.search);
+  const urlMode = params.get("mode") || "";
+  if (["working", "commit", "range"].includes(urlMode)) {
+    Object.assign(defaults, {
+      tab: "changes",
+      mode: urlMode,
+      from: params.get("from") || "",
+      to: params.get("to") || "",
+      // Match the in-app pickers, which always open on the first change.
+      selected:
+        urlMode === "working" ? info.working.entries[0]?.path || "" : "",
+      appliedMode: urlMode,
+      base: params.get("from") || "",
+      target: params.get("to") || "",
+    });
+  }
   return defaults;
 }
 
