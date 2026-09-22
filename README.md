@@ -53,6 +53,9 @@ folders also support browsing and commenting, without the Changes view.
   merge-base/three-dot comparison. Branch names, tags, and `HEAD~2` work too.
 - **Unified / Split:** choose stacked or side-by-side diffs. Renames deliberately
   appear as deletion + addition to keep the Git layer simple.
+- **Wrap:** wrap long lines to the available width instead of scrolling
+  horizontally. Toggle it from the file header or press `W`; the choice survives
+  refresh.
 - **Mark reviewed:** moves the current file or commit message into **Reviewed**
   in the left panel and opens the next item in the same order as `J`. Reviewed
   items remain selectable; click **✓ Reviewed** to undo.
@@ -76,8 +79,9 @@ folders also support browsing and commenting, without the Changes view.
   are available without a mouse, including `J`/`K` file navigation, `L` to
   select a line or range for commenting, `F` to fuzzy-find a file across both
   reviewed and unreviewed files, `/` to filter the sidebar, and `R` to mark the
-  current file reviewed. `J`/`K` stay within matching files while sidebar search
-  is active. `U` undoes the latest review status change.
+  current file reviewed. Press `W` to toggle long line wrapping. `J`/`K` stay
+  within matching files while sidebar search is active. `U` undoes the latest
+  review status change.
 - Commented lines have clickable markers that open the comment in the right
   panel. Hover a comment to highlight its lines in the matching view; click it
   to open its file/comparison and scroll to the range.

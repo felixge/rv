@@ -568,12 +568,26 @@ button.panel-toggle:hover {
   background: #edf6f0;
   border-color: #bed8c8;
 }
-.segmented + .review-toggle {
+.view-controls + .review-toggle {
   margin-left: 0;
+}
+.view-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.wrap-toggle {
+  font-size: 10px;
+  padding: 5px 8px;
+}
+.wrap-toggle[aria-pressed="true"] {
+  color: #125eaa;
+  background: #eaf2fc;
+  border-color: #b8d1ec;
 }
 .segmented {
   display: flex;
-  margin-left: auto;
   border: 1px solid #e0e4ea;
   border-radius: 4px;
   padding: 2px;

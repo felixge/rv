@@ -77,6 +77,7 @@ const shortcuts: Shortcut[] = [
   { keys: ["Y"], label: "Copy review prompt", category: "Review" },
   { keys: ["P"], label: "Preview review prompt", category: "Review" },
   { keys: ["V"], label: "Toggle unified / split diff", category: "View" },
+  { keys: ["W"], label: "Toggle long line wrapping", category: "View" },
   { keys: ["B"], label: "Toggle file browser", category: "View" },
   { keys: ["C"], label: "Toggle comments", category: "View" },
   { keys: ["Shift", "R"], label: "Refresh repository", category: "General" },
@@ -309,6 +310,7 @@ function readView(info: Info) {
     selected: "",
     search: "",
     split: false,
+    wrap: false,
     showFiles: true,
     showComments: true,
     filesWidth: 0,
@@ -876,6 +878,7 @@ function Review({ info }: { info: Info }) {
   const parsedDiffs = useRef(new Map<string, FileDiffMetadata>());
   const [loading, setLoading] = useState(false);
   const [split, setSplit] = useState(saved.split);
+  const [wrap, setWrap] = useState(saved.wrap);
   const [range, setRange] = useState<SelectedLineRange | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<string>();
@@ -917,7 +920,7 @@ function Review({ info }: { info: Info }) {
       localStorage.setItem(
         viewStorageKey,
         JSON.stringify({
-          tab, mode, from, to, selected, search, split,
+          tab, mode, from, to, selected, search, split, wrap,
           showFiles, showComments, filesWidth, commentsWidth, collapsed,
           appliedMode: !comparison.target
             ? "working"
@@ -933,7 +936,7 @@ function Review({ info }: { info: Info }) {
     }
   }, [
     viewStorageKey, restoring, comparing, tab, mode, from, to, selected,
-    search, split, showFiles, showComments, filesWidth, commentsWidth,
+    search, split, wrap, showFiles, showComments, filesWidth, commentsWidth,
     collapsed, comparison,
   ]);
   const paths = useMemo(
@@ -1099,10 +1102,10 @@ function Review({ info }: { info: Info }) {
       onLineSelected: onSelection,
       itemMetrics: { lineHeight: 23 },
       pointerEventsOnScroll: true,
-      overflow: "scroll" as const,
+      overflow: wrap ? ("wrap" as const) : ("scroll" as const),
       disableFileHeader: true,
     }),
-    [split, onSelection],
+    [split, wrap, onSelection],
   );
   const prompt = formatPrompt(comments);
   const notice = content?.newFile?.notice || content?.oldFile?.notice;
@@ -1481,7 +1484,7 @@ function Review({ info }: { info: Info }) {
         return;
       }
 
-      const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "b", "c"];
+      const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "w", "b", "c"];
       if (!handled.includes(key)) return;
       event.preventDefault();
       if (key === "?") setShowShortcuts(true);
@@ -1504,6 +1507,7 @@ function Review({ info }: { info: Info }) {
       else if (key === "y" && comments.length) void copyPrompt();
       else if (key === "p" && comments.length) setShowPrompt(true);
       else if (key === "v" && tab === "changes" && !messageView) setSplit((value) => !value);
+      else if (key === "w") setWrap((value) => !value);
       else if (key === "b") setShowFiles((value) => !value);
       else if (key === "c") setShowComments((value) => !value);
     };
@@ -1794,16 +1798,27 @@ function Review({ info }: { info: Info }) {
                   ? selected
                   : "No file selected"}
             </span>
-            {tab === "changes" && !messageView && (
-              <div className="segmented">
-                <button aria-pressed={!split} onClick={() => setSplit(false)}>
-                  Unified
-                </button>
-                <button aria-pressed={split} onClick={() => setSplit(true)}>
-                  Split
-                </button>
-              </div>
-            )}
+            <div className="view-controls">
+              <button
+                className="wrap-toggle"
+                aria-label="Wrap long lines"
+                aria-pressed={wrap}
+                title="Wrap long lines (W)"
+                onClick={() => setWrap((value) => !value)}
+              >
+                Wrap
+              </button>
+              {tab === "changes" && !messageView && (
+                <div className="segmented">
+                  <button aria-pressed={!split} onClick={() => setSplit(false)}>
+                    Unified
+                  </button>
+                  <button aria-pressed={split} onClick={() => setSplit(true)}>
+                    Split
+                  </button>
+                </div>
+              )}
+            </div>
             {(messageView || paths.includes(selected)) && (
               <button
                 className={`review-toggle${selectedReviewed ? " reviewed" : ""}`}

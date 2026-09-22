@@ -170,6 +170,21 @@ try {
   await capture("search-focus");
   await tree("shipping.ts");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
+  assert.equal(
+    await evaluate(`${shadow}.querySelector('pre').dataset.overflow`),
+    "scroll",
+  );
+  await click("Wrap long lines");
+  await wait(`${shadow}.querySelector('pre').dataset.overflow === 'wrap'`);
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Wrap long lines\"]').getAttribute('aria-pressed')"),
+    "true",
+  );
+  await browser("press", "w");
+  await wait(`${shadow}.querySelector('pre').dataset.overflow === 'scroll'`);
+  await browser("press", "w");
+  await wait(`${shadow}.querySelector('pre').dataset.overflow === 'wrap'`);
+  console.log("PASS long line wrapping toggles from the UI and W shortcut");
   await browser("press", "l");
   await browser("wait", "#line-target");
   await capture("keyboard-line-picker");
@@ -281,6 +296,10 @@ try {
   ]);
   await browser("reload");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
+  assert.equal(
+    await evaluate(`${shadow}.querySelector('pre').dataset.overflow`),
+    "wrap",
+  );
   assert.match(await evaluate("document.querySelector('.tabs .active').textContent"), /Files/);
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
   await tree("src");
@@ -296,6 +315,7 @@ try {
   assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
   await tree("src");
   await browser("press", "ArrowRight");
+  console.log("PASS long line wrapping survives refresh");
   console.log("PASS Files selection and collapsed folders survive refresh; search does not overwrite expansion");
   console.log("PASS file tree → real line click → exact file:line comment");
   console.log("PASS J selects the first file when none is selected; U undoes review toggles");
