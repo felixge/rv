@@ -1,7 +1,10 @@
 # rv
 
 A small, local code review tool for turning feedback into a prompt for a coding
-agent.
+agent, using [@pierre/diffs](https://diffs.com) and
+[@pierre/trees](https://www.npmjs.com/package/@pierre/trees).
+
+There are many tools like this, but this one is customized to my preferences.
 
 ![Reviewing working-tree changes and collecting comments](docs/screenshots/review.png)
 
