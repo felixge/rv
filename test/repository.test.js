@@ -104,6 +104,35 @@ test("single commit, root commit and ranges use exact historical contents", asyn
   assert.equal(empty.message, "Document the decision\n\nNo files changed.\n");
 });
 
+test("range diffs use the merge base so base-branch changes stay hidden", async (t) => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  f.git("reset", "--hard", "HEAD");
+  const repo = await repository(f.root);
+  // Branch off the first commit; the base gains a commit the branch never sees.
+  f.git("checkout", "-q", "-b", "topic", f.first);
+  await f.write("src/topic.ts", "export const topic = true;\n");
+  f.git("add", "src/topic.ts");
+  f.git("commit", "-qm", "Topic change");
+  const topic = f.git("rev-parse", "HEAD");
+  f.git("checkout", "-q", "main");
+  await f.write("README.md", "# Parcel\n\nThe base branch moved on.\n");
+  f.git("commit", "-aqm", "Base branch change");
+  const main = f.git("rev-parse", "HEAD");
+
+  const range = await repo.compare("range", main, topic);
+  assert.equal(range.base, f.first); // the merge base, not main itself
+  assert.equal(range.target, topic);
+  assert.deepEqual(range.entries, [
+    { path: "src/topic.ts", status: "A", additions: 1, deletions: 0 },
+  ]);
+  // The old side loads from the merge base, matching the rendered diff.
+  assert.equal(
+    (await repo.file("README.md", range.base)).contents,
+    "# Parcel\n\nA small, predictable shipping calculator.\n",
+  );
+});
+
 test("empty repositories work before the first commit, and refresh sees new changes", async (t) => {
   const f = await fixture();
   t.after(f.cleanup);

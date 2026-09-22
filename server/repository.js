@@ -190,6 +190,10 @@ export async function repository(directory) {
       base = parents[1] || (await emptyTree());
     } else if (mode === "range") {
       [base, target] = await Promise.all([resolve(from), resolve(to)]);
+      // GitHub-style semantics: diff from the merge base so commits already
+      // on the base branch never appear as reversals in the range diff.
+      const mergeBase = await git("merge-base", base, target).catch(() => "");
+      if (mergeBase) base = mergeBase.trim();
     } else throw new Error("Unknown comparison mode.");
     const diffArgs = [
       "--relative",
