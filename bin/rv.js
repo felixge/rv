@@ -16,7 +16,7 @@ try {
   });
   if (values.help) {
     console.log(
-      "Usage: difflet [directory] [--port 4444] [--no-open]\n\nReview the current repository in your browser. Refresh the page to see new changes.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.",
+      "Usage: rv [directory] [--port 4444] [--no-open]\n\nReview the current repository in your browser. Refresh the page to see new changes.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.",
     );
   } else {
     if (positionals.length > 1)
@@ -30,14 +30,14 @@ try {
     });
     server.on("error", (error) => {
       console.error(
-        `difflet: ${error.code === "EADDRINUSE" ? "Port is busy. Use --port <number>." : error.message}`,
+        `rv: ${error.code === "EADDRINUSE" ? "Port is busy. Use --port <number>." : error.message}`,
       );
       process.exitCode = 1;
     });
     server.listen(port, values.host, () => {
       const url = `http://localhost:${server.address().port}`;
       console.log(
-        `\n  difflet → ${url}\n  ${repo.root}\n\n  Refresh the page to update. Ctrl+C to stop.\n`,
+        `\n  rv → ${url}\n  ${repo.root}\n\n  Refresh the page to update. Ctrl+C to stop.\n`,
       );
       if (!values["no-open"]) {
         const [command, args] =
@@ -56,6 +56,6 @@ try {
       process.on(signal, () => server.close());
   }
 } catch (error) {
-  console.error(`difflet: ${error.message}`);
+  console.error(`rv: ${error.message}`);
   process.exitCode = 1;
 }

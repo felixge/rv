@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 export async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "difflet-review-"));
+  const root = await mkdtemp(path.join(tmpdir(), "rv-review-"));
   const now = Date.now();
   const dates = [2 * 86400, 3 * 3600, 10 * 60].map((seconds) =>
     new Date(now - seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
@@ -17,7 +17,7 @@ export async function fixture() {
     await writeFile(path.join(root, name), contents);
   };
   git("init", "-q", "-b", "main");
-  git("config", "user.name", "Difflet Test");
+  git("config", "user.name", "Rv Test");
   git("config", "user.email", "test@example.invalid");
   await write(".gitignore", "ignored/\n");
   await write(

@@ -13,7 +13,7 @@ const f = await fixture();
 const server = createApp(await repository(f.root));
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}`;
-const session = `difflet-test-${process.pid}`;
+const session = `rv-test-${process.pid}`;
 const browser = async (...args) => {
   const { stdout } = await exec(
     "agent-browser",
@@ -333,7 +333,7 @@ try {
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
   await tree("src");
   await browser("press", "ArrowLeft");
-  await wait(`JSON.parse(localStorage.getItem(${JSON.stringify(`difflet:view:${f.root}`)})).collapsed.includes('src/')`);
+  await wait(`JSON.parse(localStorage.getItem(${JSON.stringify(`rv:view:${f.root}`)})).collapsed.includes('src/')`);
   await browser("reload");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
   const srcFolder = "document.querySelector('file-tree-container').shadowRoot.querySelector('[role=treeitem][aria-label=src]')";
@@ -1059,7 +1059,7 @@ try {
   await click("Mark reviewed");
   await resizePanel("files", 60);
   await click("Hide comments");
-  await evaluate("localStorage.setItem('difflet:comments:/another-repo', 'keep me')");
+  await evaluate("localStorage.setItem('rv:comments:/another-repo', 'keep me')");
   const beforeReset = await evaluate("JSON.stringify({...localStorage})");
   await click("Reset");
   assert.match(JSON.stringify(await browser("dialog", "status")), /All comments, review progress and view settings/);
@@ -1084,8 +1084,8 @@ try {
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
   assert.equal(await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width"), 232);
   assert.equal(await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width"), 310);
-  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(`difflet:reviewed:${f.root}`)})`), "{}");
-  assert.equal(await evaluate("localStorage.getItem('difflet:comments:/another-repo')"), "keep me");
+  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(`rv:reviewed:${f.root}`)})`), "{}");
+  assert.equal(await evaluate("localStorage.getItem('rv:comments:/another-repo')"), "keep me");
   assert.doesNotMatch(await evaluate("document.body.textContent"), /Clear Comments|Undo/);
   await capture("review-reset");
   await browser("reload");
@@ -1306,7 +1306,7 @@ try {
     "PASS Reviewed moves files and messages without duplicates; search, selection, undo, per-comparison isolation, historical persistence and mutable-view refresh reset",
   );
   // Old/corrupt UI state must not prevent opening or resetting a repository.
-  const viewKey = JSON.stringify(`difflet:view:${f.root}`);
+  const viewKey = JSON.stringify(`rv:view:${f.root}`);
   await evaluate(`localStorage.setItem(${viewKey}, '{broken')`);
   await browser("reload");
   await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");

@@ -31,7 +31,7 @@ export function createApp(repo, { allowRemote = false } = {}) {
       if (url.pathname.startsWith("/api/")) {
         // Custom header + no CORS prevents other websites reading local source files.
         if (
-          req.headers["x-difflet"] !== "1" ||
+          req.headers["x-rv"] !== "1" ||
           req.headers["sec-fetch-site"] === "cross-site"
         )
           return send(403, { error: "Same-origin access only." });

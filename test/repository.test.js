@@ -191,7 +191,7 @@ test("HTTP is read-only, blocks cross-origin reads and serves the built UI", asy
   assert.equal(
     (
       await fetch(`${url}/api/info`, {
-        headers: { "X-Difflet": "1", "Sec-Fetch-Site": "cross-site" },
+        headers: { "X-Rv": "1", "Sec-Fetch-Site": "cross-site" },
       })
     ).status,
     403,
@@ -199,7 +199,7 @@ test("HTTP is read-only, blocks cross-origin reads and serves the built UI", asy
   const foreignHostStatus = await new Promise((resolve, reject) => {
     get(
       `${url}/api/info`,
-      { headers: { "X-Difflet": "1", Host: "evil.example" } },
+      { headers: { "X-Rv": "1", Host: "evil.example" } },
       (response) => {
         response.resume();
         resolve(response.statusCode);
@@ -212,11 +212,11 @@ test("HTTP is read-only, blocks cross-origin reads and serves the built UI", asy
     405,
   );
   const response = await fetch(`${url}/api/info`, {
-    headers: { "X-Difflet": "1" },
+    headers: { "X-Rv": "1" },
   });
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal((await response.json()).commits.length, 3);
-  assert.match(await (await fetch(url)).text(), /difflet — local code review/);
+  assert.match(await (await fetch(url)).text(), /rv — local code review/);
 });
 
 test("prompt contains only exact file:line references and associated comments", () => {
@@ -246,7 +246,7 @@ test("prompt contains only exact file:line references and associated comments", 
 });
 
 test("ordinary folders and brand-new Git repositories with zero objects work", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "difflet-empty-"));
+  const root = await mkdtemp(path.join(tmpdir(), "rv-empty-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, "hello.txt"), "hello\n");
   const folder = await repository(root);

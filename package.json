@@ -1,10 +1,10 @@
 {
-  "name": "difflet",
+  "name": "rv",
   "version": "0.1.0",
   "description": "A small local code review tool. Select lines, leave comments, copy a prompt.",
   "type": "module",
   "bin": {
-    "difflet": "bin/difflet.js"
+    "rv": "bin/rv.js"
   },
   "files": [
     "bin",
@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit && vite build",
-    "start": "node bin/difflet.js",
+    "start": "node bin/rv.js",
     "test": "node --test test/*.test.js",
     "test:browser": "node test/browser.js",
     "test:performance": "node test/navigation.js",

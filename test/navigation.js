@@ -9,7 +9,7 @@ import { repository } from "../server/repository.js";
 import { createApp } from "../server/http.js";
 
 const exec = promisify(execFile);
-const root = await mkdtemp(path.join(tmpdir(), "difflet-navigation-"));
+const root = await mkdtemp(path.join(tmpdir(), "rv-navigation-"));
 const session = `nav-${process.pid}`;
 const browser = async (...args) => {
   const { stdout } = await exec("agent-browser", ["--session", session, "--json", ...args], {

@@ -323,7 +323,7 @@ function readView(info: Info) {
   };
   try {
     const stored = JSON.parse(
-      localStorage.getItem(`difflet:view:${info.root}`) || "{}",
+      localStorage.getItem(`rv:view:${info.root}`) || "{}",
     );
     for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
       if (typeof stored?.[key] !== typeof defaults[key]) continue;
@@ -355,7 +355,7 @@ function api<T>(
   if (!requests.has(url))
     requests.set(
       url,
-      fetch(url, { headers: { "X-Difflet": "1" } })
+      fetch(url, { headers: { "X-Rv": "1" } })
         .then(async (response) => {
           const data = await response.json();
           if (!response.ok) {
@@ -859,8 +859,8 @@ function App() {
   if (!info)
     return (
       <div className="startup">
-        <span className="brand-mark">d/</span>
-        <h1>difflet</h1>
+        <span className="brand-mark">r/</span>
+        <h1>rv</h1>
         <p role="status">{error || "Opening your repository…"}</p>
         {error && <button onClick={() => location.reload()}>Try again</button>}
       </div>
@@ -869,9 +869,9 @@ function App() {
 }
 
 function Review({ info }: { info: Info }) {
-  const storageKey = `difflet:comments:${info.root}`;
-  const reviewedStorageKey = `difflet:reviewed:${info.root}`;
-  const viewStorageKey = `difflet:view:${info.root}`;
+  const storageKey = `rv:comments:${info.root}`;
+  const reviewedStorageKey = `rv:reviewed:${info.root}`;
+  const viewStorageKey = `rv:view:${info.root}`;
   const [saved] = useState(() => readView(info));
   const [restoring, setRestoring] = useState(saved.appliedMode !== "working");
   const [reviewed, setReviewed] = useState<Record<string, string[]>>(() => {
@@ -1589,7 +1589,7 @@ function Review({ info }: { info: Info }) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">d/</span>difflet
+          <span className="brand-mark">r/</span>rv
         </div>
         <span className="divider" />
         <span className="repo-name" title={info.root}>

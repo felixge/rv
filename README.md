@@ -1,4 +1,4 @@
-# difflet
+# rv
 
 A small, local code review tool. React, [Pierre Trees](https://trees.software/),
 [Pierre Diffs](https://diffs.com/), and a Node standard-library server. No accounts,
@@ -19,7 +19,7 @@ npm link
 Then, in any repository:
 
 ```sh
-difflet
+rv
 ```
 
 This opens your browser and keeps a read-only server running in the terminal.
@@ -27,7 +27,7 @@ Ctrl+C stops it. The default port is 4444. To review another directory or avoid
 opening the browser automatically:
 
 ```sh
-difflet /path/to/project --port 4445 --no-open
+rv /path/to/project --port 4445 --no-open
 ```
 
 Running from a subdirectory reviews the Git repository root. Ordinary non-Git
@@ -163,5 +163,5 @@ To create an installable package (includes the built UI):
 
 ```sh
 npm pack
-npm install -g ./difflet-0.1.0.tgz
+npm install -g ./rv-0.1.0.tgz
 ```
