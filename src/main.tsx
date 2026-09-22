@@ -396,6 +396,10 @@ const treeStyle = themeToTreeStyles({
     "list.activeSelectionForeground": "#125eaa",
   },
 });
+const inactiveTreeStyle = {
+  ...treeStyle,
+  "--trees-focus-ring-color-override": "transparent",
+} as CSSProperties;
 
 function BrowserTree({
   paths,
@@ -494,7 +498,13 @@ function BrowserTree({
     if (item && !item.isSelected()) item.select();
     syncingSelection.current = false;
   }, [model, selected, paths]);
-  return <FileTree model={model} className="file-tree" style={treeStyle} />;
+  return (
+    <FileTree
+      model={model}
+      className="file-tree"
+      style={selected ? treeStyle : inactiveTreeStyle}
+    />
+  );
 }
 
 // Keep relative ages stable for this page snapshot; there is no refresh timer.
@@ -1679,7 +1689,7 @@ function Review({ info }: { info: Info }) {
                     key={`${reviewScope}:${JSON.stringify(groupPaths)}`}
                     paths={groupPaths}
                     entries={entries}
-                    selected={selected}
+                    selected={groupPaths.includes(selected) ? selected : ""}
                     onSelect={select}
                     search={search}
                     collapsed={collapsed}

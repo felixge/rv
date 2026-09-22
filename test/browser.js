@@ -1135,6 +1135,12 @@ try {
     ),
     1,
   );
+  assert.deepEqual(
+    await evaluate(
+      "Array.from(document.querySelectorAll('file-tree-container')).map(e => Array.from(e.shadowRoot.querySelectorAll('[data-item-focused=true]')).some(row => getComputedStyle(row, '::before').outlineColor !== 'rgba(0, 0, 0, 0)'))",
+    ),
+    [true, false],
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('.file-heading').lastElementChild.classList.contains('review-toggle')",
