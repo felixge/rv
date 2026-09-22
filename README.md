@@ -40,6 +40,13 @@ rv opens a browser and serves a read-only review UI on localhost. Refresh the
 page when you want to load new repository changes; nothing is written back to
 the repository.
 
+Your review state (comments, reviewed marks, view settings) is cached on local
+disk, outside the repository, in one readable directory per opened path —
+`~/.cache/rv/--home-you-repo--/state.json` on Linux,
+`~/Library/Caches/rv/--Users-you-repo--/state.json` on macOS. It survives
+server restarts, page reloads and browser changes. Reset the review from the
+UI to delete it.
+
 Open directly on uncommitted changes, a single commit, or a commit range:
 
 ```sh

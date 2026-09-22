@@ -57,6 +57,12 @@ type Comment = {
   commit?: string;
 };
 type Content = { oldFile: Source; newFile: Source };
+// The server-side disk cache, loaded once and saved back debounced.
+type SavedState = {
+  view?: Record<string, unknown>;
+  reviewed?: Record<string, string[]>;
+  comments?: Comment[];
+};
 
 type Shortcut = {
   keys: string[];
@@ -302,7 +308,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
   );
 }
 
-function readView(info: Info) {
+function readView(info: Info, stored: unknown) {
   const defaults = {
     tab: "files",
     mode: "working",
@@ -323,25 +329,23 @@ function readView(info: Info) {
     target: "",
   };
   try {
-    const stored = JSON.parse(
-      localStorage.getItem(`rv:view:${info.root}`) || "{}",
-    );
+    const view: any = stored || {};
     for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
-      if (typeof stored?.[key] !== typeof defaults[key]) continue;
+      if (typeof view?.[key] !== typeof defaults[key]) continue;
       if (
         key === "collapsed" &&
-        (!Array.isArray(stored[key]) ||
-          !stored[key].every((path: unknown) => typeof path === "string"))
+        (!Array.isArray(view[key]) ||
+          !view[key].every((path: unknown) => typeof path === "string"))
       ) continue;
-      if (key === "tab" && !["files", "changes"].includes(stored[key])) continue;
+      if (key === "tab" && !["files", "changes"].includes(view[key])) continue;
       if (
         (key === "mode" || key === "appliedMode") &&
-        !["working", "commit", "range"].includes(stored[key])
+        !["working", "commit", "range"].includes(view[key])
       ) continue;
-      Object.assign(defaults, { [key]: stored[key] });
+      Object.assign(defaults, { [key]: view[key] });
     }
   } catch {
-    // Missing, obsolete or malformed browser state falls back to current defaults.
+    // Missing, obsolete or malformed saved state falls back to current defaults.
   }
   // CLI options arrive as query params and override the saved view on first load.
   const params = new URLSearchParams(location.search);
@@ -388,6 +392,34 @@ function api<T>(
         }),
     );
   return requests.get(url) as Promise<T>;
+}
+
+async function sendState(method: "PUT" | "DELETE", state?: SavedState) {
+  const response = await fetch("/api/state", {
+    method,
+    headers: { "X-Rv": "1" },
+    body: method === "PUT" ? JSON.stringify(state) : undefined,
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error);
+}
+
+// One-time upgrade: older builds kept review state in the browser, which is
+// lost whenever the origin (port, URL, browser) changes.
+function legacyState(root: string): SavedState | null {
+  try {
+    const comments = localStorage.getItem(`rv:comments:${root}`);
+    const reviewed = localStorage.getItem(`rv:reviewed:${root}`);
+    const view = localStorage.getItem(`rv:view:${root}`);
+    if (!comments && !reviewed && !view) return null;
+    return {
+      comments: comments ? JSON.parse(comments) : [],
+      reviewed: reviewed ? JSON.parse(reviewed) : {},
+      view: view ? JSON.parse(view) : {},
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function loadFile(path: string, ref: string): Promise<Source> {
@@ -874,14 +906,22 @@ function PanelResizeHandle({
 }
 
 function App() {
-  const [info, setInfo] = useState<Info>();
+  const [loaded, setLoaded] = useState<{ info: Info; state: SavedState }>();
   const [error, setError] = useState("");
   useEffect(() => {
-    api<Info>("info")
-      .then(setInfo)
+    Promise.all([
+      api<Info>("info"),
+      // An unavailable cache still opens the review; saving errors surface later.
+      api<SavedState>("state").catch(() => ({})),
+    ])
+      .then(([info, state]) => {
+        const legacy = Object.keys(state).length ? null : legacyState(info.root);
+        if (legacy) void sendState("PUT", legacy).catch(() => {});
+        setLoaded({ info, state: legacy || state });
+      })
       .catch((e) => setError(e.message));
   }, []);
-  if (!info)
+  if (!loaded)
     return (
       <div className="startup">
         <span className="brand-mark">r/</span>
@@ -890,59 +930,20 @@ function App() {
         {error && <button onClick={() => location.reload()}>Try again</button>}
       </div>
     );
-  return <Review info={info} />;
+  return <Review info={loaded.info} state={loaded.state} />;
 }
 
-function Review({ info }: { info: Info }) {
-  const storageKey = `rv:comments:${info.root}`;
-  const reviewedStorageKey = `rv:reviewed:${info.root}`;
-  const viewStorageKey = `rv:view:${info.root}`;
-  const [saved] = useState(() => readView(info));
+function Review({ info, state }: { info: Info; state: SavedState }) {
+  const [saved] = useState(() => readView(info, state.view));
   const [restoring, setRestoring] = useState(saved.appliedMode !== "working");
-  const [reviewed, setReviewed] = useState<Record<string, string[]>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(reviewedStorageKey) || "{}");
-    } catch {
-      return {};
-    }
-  });
+  const [reviewed, setReviewed] = useState<Record<string, string[]>>(() =>
+    state.reviewed && typeof state.reviewed === "object" ? state.reviewed : {},
+  );
   const [search, setSearch] = useState(saved.search);
-  const [comments, setComments] = useState<Comment[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(storageKey) || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [comments, setComments] = useState<Comment[]>(() =>
+    Array.isArray(state.comments) ? state.comments : [],
+  );
   const [storageError, setStorageError] = useState("");
-  useEffect(() => {
-    try {
-      // Mutable views are only reviewed for this page snapshot.
-      localStorage.setItem(
-        reviewedStorageKey,
-        JSON.stringify(
-          Object.fromEntries(
-            Object.entries(reviewed).filter(
-              ([scope]) => scope !== "files" && scope !== "working",
-            ),
-          ),
-        ),
-      );
-    } catch {
-      setStorageError(
-        "Browser storage is unavailable. Review progress will not survive refresh.",
-      );
-    }
-  }, [reviewed, reviewedStorageKey]);
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(comments));
-    } catch {
-      setStorageError(
-        "Browser storage is unavailable. Copy your comments before closing.",
-      );
-    }
-  }, [comments, storageKey]);
   const [tab, setTab] = useState(saved.tab);
   const [mode, setMode] = useState(saved.mode);
   const [from, setFrom] = useState(saved.from);
@@ -1000,13 +1001,20 @@ function Review({ info }: { info: Info }) {
         () => setRestoring(false),
       );
   }, []);
+  // Review state is saved to the server's disk cache, debounced because
+  // changes fire in bursts. stateRef always holds the complete state, so a
+  // save during a compare (which freezes the view) still includes the last
+  // stable view. The flush uses keepalive and is also triggered from pagehide,
+  // so a change is never lost to closing or reloading mid-debounce.
+  const stateRef = useRef<SavedState>(state);
+  const stateDirty = useRef(false);
+  const stateFlush = useRef<(keepalive?: boolean) => void>(() => {});
   useEffect(() => {
-    if (restoring || comparing) return;
-    try {
+    if (!restoring && !comparing) {
       // Persist navigation inputs, never fetched files, diffs or derived labels.
-      localStorage.setItem(
-        viewStorageKey,
-        JSON.stringify({
+      stateRef.current = {
+        ...stateRef.current,
+        view: {
           tab, mode, from, to, selected, search, split, wrap,
           showFiles, showComments, filesWidth, commentsWidth, collapsed,
           appliedMode: !comparison.target
@@ -1014,18 +1022,53 @@ function Review({ info }: { info: Info }) {
             : comparison.message !== undefined ? "commit" : "range",
           base: comparison.target ? comparison.base : "",
           target: comparison.target,
-        }),
-      );
-    } catch {
-      setStorageError(
-        "Browser storage is unavailable. View state will not survive refresh.",
-      );
+        },
+      };
     }
+    // Mutable views are only reviewed for this page snapshot.
+    stateRef.current = {
+      ...stateRef.current,
+      reviewed: Object.fromEntries(
+        Object.entries(reviewed).filter(
+          ([scope]) => scope !== "files" && scope !== "working",
+        ),
+      ),
+      comments,
+    };
+    stateDirty.current = true;
+    const timer = setTimeout(() => stateFlush.current(), 250);
+    return () => clearTimeout(timer);
   }, [
-    viewStorageKey, restoring, comparing, tab, mode, from, to, selected,
-    search, split, wrap, showFiles, showComments, filesWidth, commentsWidth,
-    collapsed, comparison,
+    restoring, comparing, tab, mode, from, to, selected, search, split, wrap,
+    showFiles, showComments, filesWidth, commentsWidth, collapsed, comparison,
+    reviewed, comments,
   ]);
+  useEffect(() => {
+    const flush = (keepalive = false) => {
+      if (!stateDirty.current) return;
+      stateDirty.current = false;
+      fetch("/api/state", {
+        method: "PUT",
+        headers: { "X-Rv": "1" },
+        body: JSON.stringify(stateRef.current),
+        keepalive,
+      })
+        .then(async (response) => {
+          if (response.ok) return;
+          throw new Error((await response.json()).error);
+        })
+        .catch(() => {
+          stateDirty.current = true;
+          setStorageError(
+            "Could not save review state to disk. Copy your comments before closing.",
+          );
+        });
+    };
+    stateFlush.current = flush;
+    const flushOnHide = () => flush(true);
+    window.addEventListener("pagehide", flushOnHide);
+    return () => window.removeEventListener("pagehide", flushOnHide);
+  }, []);
   const paths = useMemo(
     () =>
       tab === "files"
@@ -1423,15 +1466,24 @@ function Review({ info }: { info: Info }) {
     if (!window.confirm(
       "Reset this repository’s review? All comments, review progress and view settings will be deleted. This cannot be undone.",
     )) return;
-    try {
-      for (const key of [storageKey, reviewedStorageKey, viewStorageKey])
-        localStorage.removeItem(key);
-      location.reload();
-    } catch {
-      setStorageError(
-        "Browser storage is unavailable. Could not reset the review.",
-      );
-    }
+    // The reload below fires the pagehide flush; drop the pending state so it
+    // cannot re-save what the delete removes.
+    stateDirty.current = false;
+    sendState("DELETE")
+      .catch(() => {})
+      .finally(() => {
+        // Drop keys from pre-cache builds so a stale browser copy never
+        // re-seeds the state we just deleted.
+        try {
+          for (const key of [
+            `rv:comments:${info.root}`,
+            `rv:reviewed:${info.root}`,
+            `rv:view:${info.root}`,
+          ])
+            localStorage.removeItem(key);
+        } catch {}
+        location.reload();
+      });
   }
 
   function togglePathReviewed(path: string, advance = false) {

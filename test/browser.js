@@ -6,6 +6,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { repository } from "../server/repository.js";
 import { createApp } from "../server/http.js";
+import { loadState, saveState } from "../server/state.js";
 import { fixture } from "./fixture.js";
 
 const exec = promisify(execFile);
@@ -13,6 +14,15 @@ const f = await fixture();
 const server = createApp(await repository(f.root));
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}`;
+// The app persists state to the cache file debounced; poll it from Node.
+async function waitState(predicate) {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const state = await loadState(f.root);
+    if (state && predicate(state)) return state;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail("Expected review state was never saved to the disk cache.");
+}
 const session = `rv-test-${process.pid}`;
 const browser = async (...args) => {
   const { stdout } = await exec(
@@ -354,7 +364,7 @@ try {
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
   await tree("src");
   await browser("press", "ArrowLeft");
-  await wait(`JSON.parse(localStorage.getItem(${JSON.stringify(`rv:view:${f.root}`)})).collapsed.includes('src/')`);
+  await waitState((state) => state.view.collapsed.includes("src/"));
   await browser("reload");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
   const srcFolder = "document.querySelector('file-tree-container').shadowRoot.querySelector('[role=treeitem][aria-label=src]')";
@@ -1105,7 +1115,8 @@ try {
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
   assert.equal(await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width"), 232);
   assert.equal(await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width"), 310);
-  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(`rv:reviewed:${f.root}`)})`), "{}");
+  // Reset clears the disk cache for this repository only.
+  await waitState((state) => !state.comments.length && state.view.selected === "");
   assert.equal(await evaluate("localStorage.getItem('rv:comments:/another-repo')"), "keep me");
   assert.doesNotMatch(await evaluate("document.body.textContent"), /Clear Comments|Undo/);
   await capture("review-reset");
@@ -1327,18 +1338,27 @@ try {
     "PASS Reviewed moves files and messages without duplicates; search, selection, undo, per-comparison isolation, historical persistence and mutable-view refresh reset",
   );
   // Old/corrupt UI state must not prevent opening or resetting a repository.
-  const viewKey = JSON.stringify(`rv:view:${f.root}`);
-  await evaluate(`localStorage.setItem(${viewKey}, '{broken')`);
-  await browser("reload");
+  // State now lives in the disk cache; corrupt it there while no page is open,
+  // so the app's unload flush cannot overwrite the tampered file.
+  const withComment = await loadState(f.root);
+  await browser("open", "about:blank");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await saveState(f.root, { ...withComment, view: "{broken" });
+  await browser("open", url);
   await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
   assert.equal((await comments()).length, 1);
-  await evaluate(`localStorage.setItem(${viewKey}, JSON.stringify({tab:'obsolete', split:'wrong-type', collapsed:null, selected:'deleted-file.ts', futureField:'unused'}))`);
-  await browser("reload");
+  await browser("open", "about:blank");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await saveState(f.root, { ...withComment, view: { tab: "obsolete", split: "wrong-type", collapsed: null, selected: "deleted-file.ts", futureField: "unused" } });
+  await browser("open", url);
   await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
-  assert.equal(await evaluate(`'futureField' in JSON.parse(localStorage.getItem(${viewKey}))`), false);
-  await evaluate(`localStorage.setItem(${viewKey}, JSON.stringify({tab:'changes', mode:'commit', appliedMode:'commit', target:'missing-commit', selected:'src/shipping.ts'}))`);
-  await browser("reload");
+  // The app re-saves its validated view, dropping unknown fields and values.
+  await waitState((state) => state.view && !("futureField" in state.view) && state.view.tab === "files");
+  await browser("open", "about:blank");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await saveState(f.root, { ...withComment, view: { tab: "changes", mode: "commit", appliedMode: "commit", target: "missing-commit", selected: "src/shipping.ts" } });
+  await browser("open", url);
   await wait("document.querySelector('[role=alert]')?.textContent.includes('Unknown commit')");
   await click("Reset");
   await browser("dialog", "accept");
