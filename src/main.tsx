@@ -1925,15 +1925,6 @@ function Review({ info }: { info: Info }) {
                   : "No file selected"}
             </span>
             <div className="view-controls">
-              <button
-                className="wrap-toggle"
-                aria-label="Wrap long lines"
-                aria-pressed={wrap}
-                title="Wrap long lines (W)"
-                onClick={() => setWrap((value) => !value)}
-              >
-                Wrap
-              </button>
               {tab === "changes" && !messageView && (
                 <div className="segmented">
                   <button aria-pressed={!split} onClick={() => setSplit(false)}>
@@ -1944,6 +1935,15 @@ function Review({ info }: { info: Info }) {
                   </button>
                 </div>
               )}
+              <button
+                className="wrap-toggle"
+                aria-label="Wrap long lines"
+                aria-pressed={wrap}
+                title="Wrap long lines (W)"
+                onClick={() => setWrap((value) => !value)}
+              >
+                Wrap
+              </button>
             </div>
             {(messageView || paths.includes(selected)) && (
               <button
