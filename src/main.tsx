@@ -71,6 +71,7 @@ const shortcuts: Shortcut[] = [
   { keys: ["G", "C"], label: "Go to Changes", category: "Navigate" },
   { keys: ["L"], label: "Comment on a line or range", category: "Review" },
   { keys: ["R"], label: "Toggle reviewed", category: "Review" },
+  { keys: ["U"], label: "Undo last action", category: "Review" },
   { keys: ["⌘/Ctrl", "Enter"], label: "Save comment", category: "Review" },
   { keys: ["Y"], label: "Copy review prompt", category: "Review" },
   { keys: ["P"], label: "Preview review prompt", category: "Review" },
@@ -296,7 +297,9 @@ function BrowserTree({
 }) {
   const selectRef = useRef(onSelect);
   const collapseRef = useRef(onCollapse);
+  const searchRef = useRef(search);
   collapseRef.current = onCollapse;
+  searchRef.current = search;
   const syncingSelection = useRef(false);
   const syncingExpansion = useRef(false);
   selectRef.current = (path) => {
@@ -331,6 +334,15 @@ function BrowserTree({
       directories.map((path) => [path, collapsed.includes(path)]),
     );
     return model.subscribe(() => {
+      if (searchRef.current && !model.getSearchValue()) {
+        queueMicrotask(() => {
+          if (!searchRef.current || model.getSearchValue()) return;
+          syncingExpansion.current = true;
+          model.setSearch(searchRef.current);
+          syncingExpansion.current = false;
+        });
+        return;
+      }
       // Searching temporarily expands matches; it must not overwrite user choices.
       if (syncingExpansion.current || model.getSearchValue()) return;
       for (const path of directories) {
@@ -757,6 +769,11 @@ function Review({ info }: { info: Info }) {
   const comparisonRequest = useRef(0);
   const keySequence = useRef("");
   const keySequenceTimer = useRef<number | undefined>(undefined);
+  const reviewHistory = useRef<{
+    scope: string;
+    path: string;
+    reviewed: boolean;
+  }[]>([]);
   useEffect(() => {
     if (saved.appliedMode !== "working")
       void compare(saved.appliedMode, saved.target, saved.base, true).finally(
@@ -1200,6 +1217,12 @@ function Review({ info }: { info: Info }) {
   function toggleReviewed() {
     if (!selected || !(messageView || paths.includes(selected)) || loading || comparing)
       return;
+    reviewHistory.current.push({
+      scope: reviewScope,
+      path: selected,
+      reviewed: selectedReviewed,
+    });
+    if (!selectedReviewed) moveFile(1);
     setReviewed((current) => ({
       ...current,
       [reviewScope]: selectedReviewed
@@ -1208,15 +1231,43 @@ function Review({ info }: { info: Info }) {
     }));
   }
 
-  const reviewItems = useMemo(
-    () => [
-      ...(hasMessage && !messageReviewed ? [MESSAGE_PATH] : []),
-      ...treeOrdered(unreviewedPaths),
-      ...(hasMessage && messageReviewed ? [MESSAGE_PATH] : []),
-      ...treeOrdered(reviewedPaths),
-    ],
-    [hasMessage, messageReviewed, unreviewedPaths, reviewedPaths],
-  );
+  function undo() {
+    const action = reviewHistory.current.pop();
+    if (!action) return;
+    setReviewed((current) => {
+      const paths = current[action.scope] || [];
+      return {
+        ...current,
+        [action.scope]: action.reviewed
+          ? [...new Set([...paths, action.path])]
+          : paths.filter((path) => path !== action.path),
+      };
+    });
+    if (
+      action.scope === reviewScope &&
+      (action.path === MESSAGE_PATH || paths.includes(action.path))
+    ) select(action.path);
+  }
+
+  const reviewItems = useMemo(() => {
+    const query = search.trim().replaceAll("\\", "/").toLowerCase();
+    const matchingUnreviewed = unreviewedPaths.filter((path) =>
+      path.toLowerCase().includes(query),
+    );
+    const matchingReviewed = reviewedPaths.filter((path) =>
+      path.toLowerCase().includes(query),
+    );
+    return [
+      ...(hasMessage && !messageReviewed && "commit message".includes(query)
+        ? [MESSAGE_PATH]
+        : []),
+      ...treeOrdered(matchingUnreviewed),
+      ...(hasMessage && messageReviewed && "commit message".includes(query)
+        ? [MESSAGE_PATH]
+        : []),
+      ...treeOrdered(matchingReviewed),
+    ];
+  }, [search, hasMessage, messageReviewed, unreviewedPaths, reviewedPaths]);
   function moveFile(offset: number) {
     if (!reviewItems.length) return;
     const current = reviewItems.indexOf(selected);
@@ -1298,7 +1349,7 @@ function Review({ info }: { info: Info }) {
         return;
       }
 
-      const handled = ["?", "/", "j", "k", "l", "r", "y", "p", "v", "b", "c"];
+      const handled = ["?", "/", "j", "k", "l", "r", "u", "y", "p", "v", "b", "c"];
       if (!handled.includes(key)) return;
       event.preventDefault();
       if (key === "?") setShowShortcuts(true);
@@ -1316,6 +1367,7 @@ function Review({ info }: { info: Info }) {
         setShowLinePicker(true);
       } else if (key === "r" && event.shiftKey) location.reload();
       else if (key === "r") toggleReviewed();
+      else if (key === "u") undo();
       else if (key === "y" && comments.length) void copyPrompt();
       else if (key === "p" && comments.length) setShowPrompt(true);
       else if (key === "v" && tab === "changes" && !messageView) setSplit((value) => !value);

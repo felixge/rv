@@ -54,7 +54,8 @@ folders also support browsing and commenting, without the Changes view.
 - **Unified / Split:** choose stacked or side-by-side diffs. Renames deliberately
   appear as deletion + addition to keep the Git layer simple.
 - **Mark reviewed:** moves the current file or commit message into **Reviewed**
-  in the left panel. It stays open and selectable; click **✓ Reviewed** to undo.
+  in the left panel and opens the next item in the same order as `J`. Reviewed
+  items remain selectable; click **✓ Reviewed** to undo.
   Search covers both sections. Progress is separate for each commit/range and
   persists in this browser. Files and Working tree progress lasts until refresh,
   so newly edited content is never silently marked reviewed.
@@ -74,7 +75,8 @@ folders also support browsing and commenting, without the Changes view.
 - Press **?** for a searchable keyboard shortcut guide. Common review actions
   are available without a mouse, including `J`/`K` file navigation, `L` to
   select a line or range for commenting, `/` to search files, and `R` to mark
-  the current file reviewed.
+  the current file reviewed. `J`/`K` stay within matching files while search is
+  active. `U` undoes the latest review status change.
 - Commented lines have clickable markers that open the comment in the right
   panel. Hover a comment to highlight its lines in the matching view; click it
   to open its file/comparison and scroll to the range.

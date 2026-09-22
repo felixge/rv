@@ -135,6 +135,9 @@ try {
     ),
     false,
   );
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent === 'src/discount.ts'");
   await capture("files-empty");
   await browser("focus", '[aria-label="Find a file"]');
   assert.deepEqual(
@@ -144,6 +147,26 @@ try {
   })()`),
     { outer: "solid", inner: "none" },
   );
+  await browser("fill", '[aria-label="Find a file"]', "shipping");
+  await tree("shipping.ts");
+  await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
+  await tree("shipping.ts");
+  await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  assert.equal(
+    await evaluate(`Array.from(document.querySelectorAll('file-tree-container')).every(tree => !Array.from(tree.shadowRoot.querySelectorAll('[role=treeitem]')).some(item => item.getAttribute('aria-label') === 'README.md'))`),
+    true,
+  );
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Find a file\"]').value"),
+    "shipping",
+  );
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent === 'test/shipping.test.ts'");
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
+  await browser("press", "k");
+  await wait("document.querySelector('.file-path').textContent === 'test/shipping.test.ts'");
+  await browser("fill", '[aria-label="Find a file"]', "");
   await capture("search-focus");
   await tree("shipping.ts");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
@@ -164,8 +187,19 @@ try {
   await browser("press", "k");
   await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
   await browser("press", "r");
+  await wait("document.querySelector('.file-path').textContent === 'test/shipping.test.ts'");
+  await browser("press", "u");
+  await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
+  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'false'");
+  await browser("press", "r");
+  await wait("document.querySelector('.file-path').textContent === 'test/shipping.test.ts'");
+  await tree("shipping.ts");
   await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'true'");
   await browser("press", "r");
+  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'false'");
+  await browser("press", "u");
+  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'true'");
+  await browser("press", "u");
   await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'false'");
   await browser("press", "b");
   assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), true);
@@ -189,8 +223,18 @@ try {
   await wait("document.querySelector('.tabs .active').textContent.includes('Files')");
   await tree("README.md");
   await wait("document.querySelector('.file-path').textContent === 'README.md'");
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent === 'src/discount.ts'");
+  await browser("press", "k");
+  await wait("document.querySelector('.file-path').textContent === 'README.md'");
   await browser("press", "r");
-  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'true'");
+  await wait("document.querySelector('.file-path').textContent === 'src/discount.ts'");
+  assert.equal(
+    await evaluate(
+      "Array.from(document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelectorAll('[role=treeitem]')).some(item => item.getAttribute('aria-label') === 'README.md')",
+    ),
+    true,
+  );
   await tree(".gitignore");
   await wait("document.querySelector('.file-path').textContent === '.gitignore'");
   await browser("press", "j");
@@ -231,6 +275,9 @@ try {
   await browser("press", "ArrowRight");
   console.log("PASS Files selection and collapsed folders survive refresh; search does not overwrite expansion");
   console.log("PASS file tree → real line click → exact file:line comment");
+  console.log("PASS J selects the first file when none is selected; U undoes review toggles");
+  console.log("PASS J/K navigation only considers files matching the search filter");
+  console.log("PASS marking reviewed opens the same next file as J");
   console.log("PASS shortcuts follow sidebar tree order across unreviewed/reviewed sections and wrap");
 
   await browser("hover", ".comment");
