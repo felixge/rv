@@ -15,36 +15,40 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   t.after(f.cleanup);
   const repo = await repository(path.join(f.root, "src"));
   const info = await repo.info();
-  assert.equal(repo.root, f.root);
+  // Opening a subdirectory reviews only that directory, with scope-relative paths.
+  assert.equal(repo.root, path.join(f.root, "src"));
+  assert.deepEqual(info.files, ["discount.ts", "shipping.ts"]);
+  await f.write("src/ignored/secret.txt", "not in the browser");
+  assert.ok(!(await repo.info()).files.includes("ignored/secret.txt"));
   assert.deepEqual(info.working.entries, [
-    { path: "src/discount.ts", status: "U", additions: 3, deletions: 0 },
-    { path: "src/legacy.ts", status: "D", additions: 0, deletions: 1 },
-    { path: "src/shipping.ts", status: "M", additions: 3, deletions: 3 },
+    { path: "discount.ts", status: "U", additions: 3, deletions: 0 },
+    { path: "legacy.ts", status: "D", additions: 0, deletions: 1 },
+    { path: "shipping.ts", status: "M", additions: 3, deletions: 3 },
   ]);
-  assert.equal(info.commits.length, 3);
-  assert.equal(info.commits[0].subject, "Introduce free shipping threshold");
-  assert.ok(!info.files.includes("ignored/secret.txt"));
-  assert.ok(!info.files.includes("src/legacy.ts"));
-  assert.ok(info.files.includes("src/discount.ts"));
-  // The Files explorer shows total lines of code per current file.
-  assert.equal(info.lineCounts["README.md"], 3);
-  assert.ok(info.lineCounts["src/shipping.ts"] > 0);
-  assert.ok(!("src/legacy.ts" in info.lineCounts));
+  assert.equal(info.commits.length, 3); // commit history stays repository-wide
+  const commit = await repo.compare("commit", "", f.second);
+  assert.deepEqual(commit.entries, [
+    { path: "shipping.ts", status: "M", additions: 1, deletions: 1 },
+  ]);
+  // The Files explorer shows total lines of code per current file,
+  // keyed like the file list, so scoped runs use scope-relative paths.
+  assert.ok(info.lineCounts["shipping.ts"] > 0);
+  assert.ok(!("legacy.ts" in info.lineCounts));
   // A staged deletion stays reviewable but absent from Files; recreating it
   // makes it a current file again, even while its deletion remains staged.
   f.git("add", "src/legacy.ts");
-  assert.ok(!(await repo.info()).files.includes("src/legacy.ts"));
+  assert.ok(!(await repo.info()).files.includes("legacy.ts"));
   await f.write("src/legacy.ts", "recreated\n");
-  assert.ok((await repo.info()).files.includes("src/legacy.ts"));
+  assert.ok((await repo.info()).files.includes("legacy.ts"));
   await rm(path.join(f.root, "src/legacy.ts"));
-  const oldFile = await repo.file("src/shipping.ts", info.working.base);
-  const newFile = await repo.file("src/shipping.ts");
+  const oldFile = await repo.file("shipping.ts", info.working.base);
+  const newFile = await repo.file("shipping.ts");
   assert.match(oldFile.contents, /THRESHOLD = 100/);
   assert.match(newFile.contents, /THRESHOLD = 75/); // staged
   assert.match(newFile.contents, /\? 6 : 14/); // unstaged
-  assert.equal(await repo.file("src/legacy.ts"), null);
+  assert.equal(await repo.file("legacy.ts"), null);
   assert.equal(
-    (await repo.file("src/legacy.ts", info.working.base)).contents,
+    (await repo.file("legacy.ts", info.working.base)).contents,
     "export const freeShipping = false;\n",
   );
 });

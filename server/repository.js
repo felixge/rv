@@ -10,7 +10,7 @@ const countLines = (text) =>
   text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 
 export async function repository(directory) {
-  let root = await realpath(directory);
+  const root = await realpath(directory);
   const git = async (...args) =>
     (
       await exec("git", ["--no-optional-locks", "-C", root, ...args], {
@@ -21,7 +21,10 @@ export async function repository(directory) {
     ).stdout;
   let isGit = true;
   try {
-    root = (await git("rev-parse", "--show-toplevel")).trim();
+    // The opened directory is the review scope: git runs with -C root so
+    // ls-files is limited to it and diff --relative limits and names diffs
+    // relative to it. Commands like rev-parse and log still work repo-wide.
+    await git("rev-parse", "--show-toplevel");
   } catch {
     isGit = false;
   }
@@ -93,7 +96,7 @@ export async function repository(directory) {
           notice: "Symbolic links and submodules are not displayed.",
         };
       const size = Number(
-        (await git("cat-file", "-s", `${ref}:${name}`)).trim(),
+        (await git("cat-file", "-s", `${ref}:./${name}`)).trim(),
       );
       if (size > MAX_FILE)
         return {
@@ -102,7 +105,7 @@ export async function repository(directory) {
           notice: "File exceeds the 2 MiB preview limit.",
         };
       data = (
-        await exec("git", ["-C", root, "show", `${ref}:${name}`], {
+        await exec("git", ["-C", root, "show", `${ref}:./${name}`], {
           encoding: "buffer",
           maxBuffer: MAX_FILE + 1024,
         })
@@ -189,6 +192,7 @@ export async function repository(directory) {
       [base, target] = await Promise.all([resolve(from), resolve(to)]);
     } else throw new Error("Unknown comparison mode.");
     const diffArgs = [
+      "--relative",
       "--no-ext-diff",
       "--no-textconv",
       "--no-renames",

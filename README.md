@@ -31,7 +31,9 @@ automatically:
 rv /path/to/project --port 4445 --no-open
 ```
 
-Running from a subdirectory reviews the Git repository root. Ordinary non-Git
+Running from a subdirectory reviews only that directory: the Files list and all
+diffs are limited to files under it and use paths relative to it, while the
+recent commit list stays repository-wide. Ordinary non-Git
 folders also support browsing and commenting, without the Changes view.
 
 ## Review
