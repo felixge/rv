@@ -23,8 +23,9 @@ rv
 ```
 
 This opens your browser and keeps a read-only server running in the terminal.
-Ctrl+C stops it. The default port is 4444. To review another directory or avoid
-opening the browser automatically:
+Ctrl+C stops it. The default port is 4444; if it is busy, a free port is picked
+automatically. To review another directory or avoid opening the browser
+automatically:
 
 ```sh
 rv /path/to/project --port 4445 --no-open

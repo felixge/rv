@@ -8,7 +8,7 @@ try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
-      port: { type: "string", default: "4444" },
+      port: { type: "string" },
       host: { type: "string", default: "127.0.0.1" },
       "no-open": { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -16,19 +16,28 @@ try {
   });
   if (values.help) {
     console.log(
-      "Usage: rv [directory] [--port 4444] [--no-open]\n\nReview the current repository in your browser. Refresh the page to see new changes.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.",
+      "Usage: rv [directory] [--port 4444] [--no-open]\n\nReview the current repository in your browser. Refresh the page to see new changes.\nIf the default port 4444 is busy, a free port is picked automatically.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.",
     );
   } else {
     if (positionals.length > 1)
       throw new Error("Expected at most one directory.");
-    const port = Number(values.port);
-    if (!Number.isInteger(port) || port < 0 || port > 65535)
+    const explicitPort = values.port === undefined ? null : Number(values.port);
+    if (
+      explicitPort !== null &&
+      (!Number.isInteger(explicitPort) || explicitPort < 0 || explicitPort > 65535)
+    )
       throw new Error("Invalid port.");
+    const port = explicitPort ?? 4444;
     const repo = await repository(positionals[0] || process.cwd());
     const server = createApp(repo, {
       allowRemote: values.host !== "127.0.0.1" && values.host !== "localhost",
     });
     server.on("error", (error) => {
+      // Without an explicit --port, fall back to any free port instead of failing.
+      if (error.code === "EADDRINUSE" && explicitPort === null) {
+        server.listen({ port: 0, host: values.host });
+        return;
+      }
       console.error(
         `rv: ${error.code === "EADDRINUSE" ? "Port is busy. Use --port <number>." : error.message}`,
       );
