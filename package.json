@@ -1,0 +1,36 @@
+{
+  "name": "difflet",
+  "version": "0.1.0",
+  "description": "A small local code review tool. Select lines, leave comments, copy a prompt.",
+  "type": "module",
+  "bin": {
+    "difflet": "bin/difflet.js"
+  },
+  "files": [
+    "bin",
+    "server",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "start": "node bin/difflet.js",
+    "test": "node --test test/*.test.js",
+    "test:browser": "node test/browser.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@pierre/diffs": "1.4.3",
+    "@pierre/trees": "1.0.0-beta.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}
