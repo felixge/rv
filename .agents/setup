@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+step() { printf '\n[setup] %s\n' "$*"; }
+
+step "Checking toolchain (Node 22+, npm, git)"
+if ! command -v node >/dev/null 2>&1 \
+  || [ "$(node -p 'parseInt(process.versions.node, 10)')" -lt 22 ]; then
+  step "Installing Node.js via apt-get"
+  apt-get update -qq
+  apt-get install -y nodejs npm
+fi
+node --version
+npm --version
+git --version
+
+step "Installing dependencies from package-lock.json"
+if [ -d node_modules ]; then
+  # Warm path: node_modules was restored with the snapshot; npm verifies it
+  # against package-lock.json and exits quickly when already in sync.
+  npm install --no-audit --no-fund
+else
+  npm ci --no-audit --no-fund
+fi
+
+step "Building UI (tsc --noEmit + vite build)"
+npm run build
+
+step "Setup complete"
