@@ -19,6 +19,7 @@
     "start": "node bin/difflet.js",
     "test": "node --test test/*.test.js",
     "test:browser": "node test/browser.js",
+    "test:performance": "node test/navigation.js",
     "prepack": "npm run build"
   },
   "dependencies": {

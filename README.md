@@ -137,6 +137,7 @@ npm run build
 npm test
 # Requires agent-browser + Chromium (agent-browser install):
 npm run test:browser
+npm run test:performance
 ```
 
 The tests create and remove disposable Git repositories. The browser test clicks
@@ -145,6 +146,11 @@ pastes back the real clipboard, verifies comment persistence/edit/delete, review
 commits and ranges, and creates a commit and a working change while the page is
 idle to verify refresh-only behavior. Set `SCREENSHOTS=/absolute/output/path` to
 capture representative states.
+
+The performance test measures in-browser J/K switching across 2,000-line
+TypeScript files in Files, Unified, and Split views. It checks worker-based
+highlighting, cache reuse, a 300 ms warm-navigation median budget, and rapid
+navigation while cold files are still highlighting.
 
 To create an installable package (includes the built UI):
 

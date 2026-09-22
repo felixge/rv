@@ -10,10 +10,12 @@ import {
 import { createRoot } from "react-dom/client";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { themeToTreeStyles, type GitStatus } from "@pierre/trees";
-import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
+import { CodeView, WorkerPoolContextProvider, type CodeViewHandle } from "@pierre/diffs/react";
+import DiffWorker from "@pierre/diffs/worker/worker.js?worker";
 import {
   parseDiffFromFile,
   type CodeViewItem,
+  type FileDiffMetadata,
   type SelectedLineRange,
 } from "@pierre/diffs";
 import { formatPrompt, reference } from "./prompt.js";
@@ -32,7 +34,7 @@ type Comparison = {
   message?: string;
 };
 const MESSAGE_PATH = "\0commit-message";
-type Source = { name: string; contents: string; notice?: string } | null;
+type Source = { name: string; contents: string; notice?: string; cacheKey?: string } | null;
 type Info = {
   root: string;
   name: string;
@@ -247,6 +249,15 @@ function api<T>(
     );
   return requests.get(url) as Promise<T>;
 }
+
+async function loadFile(path: string, ref: string): Promise<Source> {
+  const file = await api<Source>("file", { path, ref });
+  // File contents are immutable for this page's manual-refresh snapshot.
+  return file && { ...file, cacheKey: JSON.stringify([ref, path]) };
+}
+
+const workerPoolOptions = { workerFactory: () => new DiffWorker(), poolSize: 2 };
+const highlighterOptions = { theme: "light-plus" as const };
 
 const statuses: Record<string, GitStatus> = {
   M: "modified",
@@ -715,7 +726,13 @@ function Review({ info }: { info: Info }) {
   const [comparing, setComparing] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(saved.selected);
-  const [content, setContent] = useState<Content>();
+  const contentKey = JSON.stringify([
+    tab, selected, ...(tab === "changes" ? [comparison.base, comparison.target] : []),
+  ]);
+  const [loaded, setLoaded] = useState<{ key: string; content: Content }>();
+  // Never mount the previous file under the new selection while its effect loads.
+  const content = loaded?.key === contentKey ? loaded.content : undefined;
+  const parsedDiffs = useRef(new Map<string, FileDiffMetadata>());
   const [loading, setLoading] = useState(false);
   const [split, setSplit] = useState(saved.split);
   const [range, setRange] = useState<SelectedLineRange | null>(null);
@@ -821,36 +838,42 @@ function Review({ info }: { info: Info }) {
   useEffect(() => {
     if (restoring) return;
     if (messageView) {
-      setContent({
-        oldFile: null,
-        newFile: { name: "COMMIT_MESSAGE.txt", contents: comparison.message! },
+      setLoaded({
+        key: contentKey,
+        content: {
+          oldFile: null,
+          newFile: {
+            name: "COMMIT_MESSAGE.txt",
+            contents: comparison.message!,
+            cacheKey: contentKey,
+          },
+        },
       });
       setLoading(false);
       setError("");
       return;
     }
     if (!selected || !paths.includes(selected)) {
-      setContent(undefined);
+      setLoaded(undefined);
       setLoading(false);
       return;
     }
     let active = true;
     setLoading(true);
     setError("");
-    setContent(undefined);
     const load =
       tab === "files"
-        ? api<Source>("file", { path: selected, ref: "" }).then((newFile) => ({
+        ? loadFile(selected, "").then((newFile) => ({
             oldFile: null,
             newFile,
           }))
         : Promise.all([
-            api<Source>("file", { path: selected, ref: comparison.base }),
-            api<Source>("file", { path: selected, ref: comparison.target }),
+            loadFile(selected, comparison.base),
+            loadFile(selected, comparison.target),
           ]).then(([oldFile, newFile]) => ({ oldFile, newFile }));
     load
       .then((value) => {
-        if (active) setContent(value);
+        if (active) setLoaded({ key: contentKey, content: value });
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -861,7 +884,7 @@ function Review({ info }: { info: Info }) {
     return () => {
       active = false;
     };
-  }, [selected, paths, tab, comparison, messageView, restoring]);
+  }, [selected, paths, tab, comparison, messageView, restoring, contentKey]);
 
   async function compare(
     nextMode: string,
@@ -964,17 +987,18 @@ function Review({ info }: { info: Info }) {
         : {}),
     };
   }
-  const fileDiff = useMemo(
-    () =>
-      content &&
-      tab === "changes" &&
-      !messageView &&
-      !notice &&
-      (content.oldFile || content.newFile)
-        ? parseDiffFromFile(content.oldFile, content.newFile)
-        : null,
-    [content, tab, notice, messageView],
-  );
+  const fileDiff = useMemo(() => {
+    if (!content || tab !== "changes" || messageView || notice ||
+        !(content.oldFile || content.newFile)) return null;
+    let diff = parsedDiffs.current.get(contentKey);
+    if (!diff) {
+      diff = parseDiffFromFile(content.oldFile, content.newFile);
+      // Include the comparison even for additions/deletions with a missing side.
+      diff.cacheKey = contentKey;
+      parsedDiffs.current.set(contentKey, diff);
+    }
+    return diff;
+  }, [content, contentKey, tab, notice, messageView]);
   const annotations = comments.filter(matchesView).map((comment) => ({
     lineNumber: comment.end,
     side:
@@ -1044,7 +1068,7 @@ function Review({ info }: { info: Info }) {
       setPendingComment(comment);
       return;
     }
-    setContent(undefined);
+    setLoaded(undefined);
     setSearch("");
     if (comment.context === "File") {
       setTab("files");
@@ -1184,13 +1208,16 @@ function Review({ info }: { info: Info }) {
     }));
   }
 
-  function moveFile(offset: number) {
-    const reviewItems = [
+  const reviewItems = useMemo(
+    () => [
       ...(hasMessage && !messageReviewed ? [MESSAGE_PATH] : []),
       ...treeOrdered(unreviewedPaths),
       ...(hasMessage && messageReviewed ? [MESSAGE_PATH] : []),
       ...treeOrdered(reviewedPaths),
-    ];
+    ],
+    [hasMessage, messageReviewed, unreviewedPaths, reviewedPaths],
+  );
+  function moveFile(offset: number) {
     if (!reviewItems.length) return;
     const current = reviewItems.indexOf(selected);
     const next = current < 0
@@ -2032,4 +2059,11 @@ function Review({ info }: { info: Info }) {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <WorkerPoolContextProvider
+    poolOptions={workerPoolOptions}
+    highlighterOptions={highlighterOptions}
+  >
+    <App />
+  </WorkerPoolContextProvider>,
+);
