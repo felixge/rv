@@ -6,6 +6,8 @@ import path from "node:path";
 const exec = promisify(execFile);
 const MAX_FILE = 2 * 1024 * 1024;
 const split = (value) => value.split("\0").filter(Boolean);
+const countLines = (text) =>
+  text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 
 export async function repository(directory) {
   let root = await realpath(directory);
@@ -225,12 +227,7 @@ export async function repository(directory) {
         // Reuse the preview's safety/size checks; unavailable text has no line total.
         const source = await file(name).catch(() => null);
         const text = source && !source.notice ? source.contents : null;
-        const additions =
-          text === null
-            ? null
-            : text === ""
-              ? 0
-              : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+        const additions = text === null ? null : countLines(text);
         entries.push({ status: "U", path: name, additions, deletions: 0 });
       }
     }
@@ -268,13 +265,25 @@ export async function repository(directory) {
         branch = revision?.slice(0, 7) || "";
       }
     }
+    const fileList = await files();
+    // Line totals for the Files explorer, where change stats make no sense.
+    // Unavailable text (binary, oversized, symlinked) has no line total.
+    const lineCounts = {};
+    await Promise.all(
+      fileList.map(async (name) => {
+        const source = await file(name).catch(() => null);
+        lineCounts[name] =
+          source && !source.notice ? countLines(source.contents) : null;
+      }),
+    );
     return {
       root,
       name: path.basename(root),
       isGit,
       branch,
       commits,
-      files: await files(),
+      files: fileList,
+      lineCounts,
       working: await compare(),
     };
   }

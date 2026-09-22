@@ -366,6 +366,9 @@ button.panel-toggle:hover {
 .lines-removed {
   color: #b33a3a;
 }
+.lines-total {
+  color: #6b7280;
+}
 .file-section {
   display: flex;
   flex-direction: column;

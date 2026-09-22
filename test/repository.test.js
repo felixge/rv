@@ -26,6 +26,10 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   assert.ok(!info.files.includes("ignored/secret.txt"));
   assert.ok(!info.files.includes("src/legacy.ts"));
   assert.ok(info.files.includes("src/discount.ts"));
+  // The Files explorer shows total lines of code per current file.
+  assert.equal(info.lineCounts["README.md"], 3);
+  assert.ok(info.lineCounts["src/shipping.ts"] > 0);
+  assert.ok(!("src/legacy.ts" in info.lineCounts));
   // A staged deletion stays reviewable but absent from Files; recreating it
   // makes it a current file again, even while its deletion remains staged.
   f.git("add", "src/legacy.ts");
@@ -145,6 +149,12 @@ test("line counts preserve unusual paths and handle binary, empty and unterminat
     entries.find((e) => e.path === "untracked-binary.dat").additions,
     null,
   );
+  const lineCounts = (await repo.info()).lineCounts;
+  assert.equal(lineCounts[name], 3);
+  assert.equal(lineCounts["empty.txt"], 0);
+  assert.equal(lineCounts["no-newline.txt"], 2);
+  assert.equal(lineCounts["binary.dat"], null);
+  assert.equal(lineCounts["untracked-binary.dat"], null);
   f.git("add", name);
   f.git("commit", "-qm", "Count historical lines");
   assert.deepEqual((await repo.compare("commit", "", "HEAD")).entries, [

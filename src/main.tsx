@@ -41,6 +41,7 @@ type Info = {
   isGit: boolean;
   branch: string;
   files: string[];
+  lineCounts: Record<string, number | null>;
   working: Comparison;
   commits: { id: string; short: string; subject: string; date: string }[];
 };
@@ -1703,6 +1704,16 @@ function Review({ info }: { info: Info }) {
             const unavailable = groupEntries.some(
               (entry) => entry.additions == null || entry.deletions == null,
             );
+            // The explorer lists current files, not changes: show their total
+            // size in lines instead of +/− change stats.
+            const explorer = tab === "files";
+            const totalLines = groupPaths.reduce(
+              (sum, path) => sum + (info.lineCounts[path] || 0),
+              0,
+            );
+            const missingLines = groupPaths.some(
+              (path) => info.lineCounts[path] == null,
+            );
             return (
               <section
                 key={String(done)}
@@ -1725,11 +1736,27 @@ function Review({ info }: { info: Info }) {
                   </span>
                   <span
                     className="line-stats"
-                    aria-label={`${additions} lines added, ${deletions} lines removed`}
-                    title={`Lines changed${unavailable ? "; excludes files with unavailable line counts (binary or unpreviewable text)" : ""}`}
+                    aria-label={
+                      explorer
+                        ? `${totalLines.toLocaleString("en-US")} total lines of code`
+                        : `${additions} lines added, ${deletions} lines removed`
+                    }
+                    title={
+                      explorer
+                        ? `Total lines of code${missingLines ? "; excludes binary or unpreviewable files" : ""}`
+                        : `Lines changed${unavailable ? "; excludes files with unavailable line counts (binary or unpreviewable text)" : ""}`
+                    }
                   >
-                    <span className="lines-added">+{additions}</span>
-                    <span className="lines-removed">−{deletions}</span>
+                    {explorer ? (
+                      <span className="lines-total">
+                        {totalLines.toLocaleString("en-US")} lines
+                      </span>
+                    ) : (
+                      <>
+                        <span className="lines-added">+{additions}</span>
+                        <span className="lines-removed">−{deletions}</span>
+                      </>
+                    )}
                   </span>
                 </div>
                 {hasMessage &&
