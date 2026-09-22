@@ -55,6 +55,49 @@ type Comment = {
 };
 type Content = { oldFile: Source; newFile: Source };
 
+function readView(info: Info) {
+  const defaults = {
+    tab: "files",
+    mode: "working",
+    from: info.commits[1]?.id || info.commits[0]?.id || "",
+    to: info.commits[0]?.id || "",
+    selected: "",
+    search: "",
+    split: false,
+    showFiles: true,
+    showComments: true,
+    filesWidth: 0,
+    commentsWidth: 0,
+    collapsed: [] as string[],
+    // The applied comparison is distinct from unsubmitted range picker values.
+    appliedMode: "working",
+    base: "",
+    target: "",
+  };
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(`difflet:view:${info.root}`) || "{}",
+    );
+    for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
+      if (typeof stored?.[key] !== typeof defaults[key]) continue;
+      if (
+        key === "collapsed" &&
+        (!Array.isArray(stored[key]) ||
+          !stored[key].every((path: unknown) => typeof path === "string"))
+      ) continue;
+      if (key === "tab" && !["files", "changes"].includes(stored[key])) continue;
+      if (
+        (key === "mode" || key === "appliedMode") &&
+        !["working", "commit", "range"].includes(stored[key])
+      ) continue;
+      Object.assign(defaults, { [key]: stored[key] });
+    }
+  } catch {
+    // Missing, obsolete or malformed browser state falls back to current defaults.
+  }
+  return defaults;
+}
+
 // Deliberately no polling, focus revalidation, websocket, or filesystem watcher.
 const requests = new Map<string, Promise<unknown>>();
 function api<T>(
@@ -106,15 +149,22 @@ function BrowserTree({
   selected,
   onSelect,
   search,
+  collapsed,
+  onCollapse,
 }: {
   paths: string[];
   entries: Entry[];
   selected: string;
   onSelect: (path: string) => void;
   search: string;
+  collapsed: string[];
+  onCollapse: (path: string, closed: boolean) => void;
 }) {
   const selectRef = useRef(onSelect);
+  const collapseRef = useRef(onCollapse);
+  collapseRef.current = onCollapse;
   const syncingSelection = useRef(false);
+  const syncingExpansion = useRef(false);
   selectRef.current = (path) => {
     if (paths.includes(path)) onSelect(path);
   };
@@ -135,14 +185,48 @@ function BrowserTree({
     })),
   });
   useEffect(() => {
+    const directories = [...new Set(
+      paths.flatMap((path) => {
+        const parts = path.split("/");
+        return parts.slice(0, -1).map((_, i) =>
+          parts.slice(0, i + 1).join("/") + "/",
+        );
+      }),
+    )];
+    const previous = new Map(
+      directories.map((path) => [path, collapsed.includes(path)]),
+    );
+    return model.subscribe(() => {
+      // Searching temporarily expands matches; it must not overwrite user choices.
+      if (syncingExpansion.current || model.getSearchValue()) return;
+      for (const path of directories) {
+        const item = model.getItem(path);
+        if (!item || !("isExpanded" in item)) continue;
+        const closed = !item.isExpanded();
+        if (closed === previous.get(path)) continue;
+        previous.set(path, closed);
+        collapseRef.current(path, closed);
+      }
+    });
+  }, [model]);
+  useEffect(() => {
+    syncingExpansion.current = true;
     model.setSearch(search);
+    if (!search) {
+      for (const path of collapsed) {
+        const item = model.getItem(path);
+        if (item && "collapse" in item) item.collapse();
+      }
+    }
+    syncingExpansion.current = false;
   }, [model, search]);
   useEffect(() => {
     syncingSelection.current = true;
     for (const path of model.getSelectedPaths()) {
       if (path !== selected) model.getItem(path)?.deselect();
     }
-    model.getItem(selected)?.select();
+    const item = model.getItem(selected);
+    if (item && !item.isSelected()) item.select();
     syncingSelection.current = false;
   }, [model, selected, paths]);
   return <FileTree model={model} className="file-tree" style={treeStyle} />;
@@ -448,6 +532,9 @@ function App() {
 function Review({ info }: { info: Info }) {
   const storageKey = `difflet:comments:${info.root}`;
   const reviewedStorageKey = `difflet:reviewed:${info.root}`;
+  const viewStorageKey = `difflet:view:${info.root}`;
+  const [saved] = useState(() => readView(info));
+  const [restoring, setRestoring] = useState(saved.appliedMode !== "working");
   const [reviewed, setReviewed] = useState<Record<string, string[]>>(() => {
     try {
       return JSON.parse(localStorage.getItem(reviewedStorageKey) || "{}");
@@ -455,7 +542,7 @@ function Review({ info }: { info: Info }) {
       return {};
     }
   });
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(saved.search);
   const [comments, setComments] = useState<Comment[]>(() => {
     try {
       return JSON.parse(localStorage.getItem(storageKey) || "[]");
@@ -464,9 +551,6 @@ function Review({ info }: { info: Info }) {
     }
   });
   const [storageError, setStorageError] = useState("");
-  const [clearedComments, setClearedComments] = useState<Comment[] | null>(
-    null,
-  );
   useEffect(() => {
     try {
       // Mutable views are only reviewed for this page snapshot.
@@ -495,34 +579,69 @@ function Review({ info }: { info: Info }) {
       );
     }
   }, [comments, storageKey]);
-  const [tab, setTab] = useState<"files" | "changes">("files");
-  const [mode, setMode] = useState("working");
-  const [from, setFrom] = useState(
-    info.commits[1]?.id || info.commits[0]?.id || "",
-  );
-  const [to, setTo] = useState(info.commits[0]?.id || "");
+  const [tab, setTab] = useState(saved.tab);
+  const [mode, setMode] = useState(saved.mode);
+  const [from, setFrom] = useState(saved.from);
+  const [to, setTo] = useState(saved.to);
   const [comparison, setComparison] = useState<Comparison>(info.working);
-  const [compareLabel, setCompareLabel] = useState("Working tree");
+  const compareLabel = !comparison.target
+    ? "Working tree"
+    : comparison.message !== undefined
+      ? `Commit ${comparison.target.slice(0, 7)}`
+      : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
   const [comparing, setComparing] = useState(false);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(saved.selected);
   const [content, setContent] = useState<Content>();
   const [loading, setLoading] = useState(false);
-  const [split, setSplit] = useState(false);
+  const [split, setSplit] = useState(saved.split);
   const [range, setRange] = useState<SelectedLineRange | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
-  const [showFiles, setShowFiles] = useState(true);
-  const [showComments, setShowComments] = useState(true);
-  const [filesWidth, setFilesWidth] = useState<number>();
-  const [commentsWidth, setCommentsWidth] = useState<number>();
+  const [showFiles, setShowFiles] = useState(saved.showFiles);
+  const [showComments, setShowComments] = useState(saved.showComments);
+  const [filesWidth, setFilesWidth] = useState(saved.filesWidth);
+  const [commentsWidth, setCommentsWidth] = useState(saved.commentsWidth);
+  const [collapsed, setCollapsed] = useState(saved.collapsed);
   const [highlight, setHighlight] = useState<Comment | null>(null);
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const comparisonRequest = useRef(0);
+  useEffect(() => {
+    if (saved.appliedMode !== "working")
+      void compare(saved.appliedMode, saved.target, saved.base, true).finally(
+        () => setRestoring(false),
+      );
+  }, []);
+  useEffect(() => {
+    if (restoring || comparing) return;
+    try {
+      // Persist navigation inputs, never fetched files, diffs or derived labels.
+      localStorage.setItem(
+        viewStorageKey,
+        JSON.stringify({
+          tab, mode, from, to, selected, search, split,
+          showFiles, showComments, filesWidth, commentsWidth, collapsed,
+          appliedMode: !comparison.target
+            ? "working"
+            : comparison.message !== undefined ? "commit" : "range",
+          base: comparison.target ? comparison.base : "",
+          target: comparison.target,
+        }),
+      );
+    } catch {
+      setStorageError(
+        "Browser storage is unavailable. View state will not survive refresh.",
+      );
+    }
+  }, [
+    viewStorageKey, restoring, comparing, tab, mode, from, to, selected,
+    search, split, showFiles, showComments, filesWidth, commentsWidth,
+    collapsed, comparison,
+  ]);
   const paths = useMemo(
     () =>
       tab === "files"
@@ -558,7 +677,6 @@ function Review({ info }: { info: Info }) {
   const reviewedCount =
     reviewedPaths.length + (hasMessage && messageReviewed ? 1 : 0);
   const selectedReviewed = reviewedInView?.includes(selected) || false;
-  useEffect(() => setSearch(""), [reviewScope]);
   const select = useCallback(
     (path: string) => {
       if (path === selected) return;
@@ -571,6 +689,7 @@ function Review({ info }: { info: Info }) {
   );
 
   useEffect(() => {
+    if (restoring) return;
     if (messageView) {
       setContent({
         oldFile: null,
@@ -612,11 +731,19 @@ function Review({ info }: { info: Info }) {
     return () => {
       active = false;
     };
-  }, [selected, paths, tab, comparison, messageView]);
+  }, [selected, paths, tab, comparison, messageView, restoring]);
 
-  async function compare(nextMode: string, nextTo = to) {
+  async function compare(
+    nextMode: string,
+    nextTo = to,
+    nextFrom = from,
+    restore = false,
+  ) {
     const id = ++comparisonRequest.current;
-    setMode(nextMode);
+    if (!restore) {
+      setMode(nextMode);
+      setSearch("");
+    }
     setComparing(true);
     setError("");
     setRange(null);
@@ -628,27 +755,26 @@ function Review({ info }: { info: Info }) {
           ? info.working
           : await api<Comparison>("compare", {
               mode: nextMode,
-              from,
+              from: nextFrom,
               to: nextTo,
             });
       if (id !== comparisonRequest.current) return;
       setComparison(result);
-      setCompareLabel(
-        nextMode === "working"
-          ? "Working tree"
-          : nextMode === "commit"
-            ? `Commit ${result.target.slice(0, 7)}`
-            : `${result.base.slice(0, 7)} → ${result.target.slice(0, 7)}`,
-      );
       setSelected((current) =>
-        nextMode === "commit"
-          ? MESSAGE_PATH
-          : result.entries.some((entry) => entry.path === current)
-            ? current
-            : result.entries[0]?.path || "",
+        restore && (tab === "files" ||
+          result.entries.some((entry) => entry.path === current))
+          ? current
+          : nextMode === "commit"
+            ? MESSAGE_PATH
+            : result.entries.some((entry) => entry.path === current)
+              ? current
+              : result.entries[0]?.path || "",
       );
     } catch (e) {
-      if (id === comparisonRequest.current) setError((e as Error).message);
+      if (id === comparisonRequest.current) {
+        if (restore) setSelected("");
+        setError((e as Error).message);
+      }
     } finally {
       if (id === comparisonRequest.current) setComparing(false);
     }
@@ -789,6 +915,7 @@ function Review({ info }: { info: Info }) {
       return;
     }
     setContent(undefined);
+    setSearch("");
     if (comment.context === "File") {
       setTab("files");
       setComparing(false);
@@ -812,7 +939,6 @@ function Review({ info }: { info: Info }) {
               }));
         if (id !== comparisonRequest.current) return;
         setComparison(result);
-        setCompareLabel(comment.context);
         setMode(nextMode);
         setFrom(result.base);
         setTo(result.target || info.commits[0]?.id || "");
@@ -887,6 +1013,7 @@ function Review({ info }: { info: Info }) {
 
   function changeTab(value: "files" | "changes") {
     setTab(value);
+    setSearch("");
     setRange(null);
     setHighlight(null);
     setPendingComment(null);
@@ -901,6 +1028,21 @@ function Review({ info }: { info: Info }) {
       );
   }
 
+  function reset() {
+    if (!window.confirm(
+      "Reset this repository’s review? All comments, review progress and view settings will be deleted. This cannot be undone.",
+    )) return;
+    try {
+      for (const key of [storageKey, reviewedStorageKey, viewStorageKey])
+        localStorage.removeItem(key);
+      location.reload();
+    } catch {
+      setStorageError(
+        "Browser storage is unavailable. Could not reset the review.",
+      );
+    }
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -913,9 +1055,9 @@ function Review({ info }: { info: Info }) {
         </span>
         {info.branch && <span className="branch">⑂ {info.branch}</span>}
         <div className="top-actions">
-          <span className="local-label">
-            <i /> local review
-          </span>
+          <button className="reset" onClick={reset}>
+            Reset
+          </button>
           <button
             className="primary copy"
             disabled={!comments.length}
@@ -930,8 +1072,8 @@ function Review({ info }: { info: Info }) {
         className={`workspace${showFiles ? "" : " hide-files"}${showComments ? "" : " hide-comments"}`}
         style={
           {
-            "--files-size": filesWidth && `${filesWidth}px`,
-            "--comments-size": commentsWidth && `${commentsWidth}px`,
+            "--files-size": filesWidth ? `${filesWidth}px` : undefined,
+            "--comments-size": commentsWidth ? `${commentsWidth}px` : undefined,
           } as CSSProperties
         }
       >
@@ -1062,6 +1204,14 @@ function Review({ info }: { info: Info }) {
                     selected={selected}
                     onSelect={select}
                     search={search}
+                    collapsed={collapsed}
+                    onCollapse={(path, closed) =>
+                      setCollapsed((current) =>
+                        closed
+                          ? [...new Set([...current, path])]
+                          : current.filter((item) => item !== path),
+                      )
+                    }
                   />
                 )}
                 {!done &&
@@ -1143,7 +1293,7 @@ function Review({ info }: { info: Info }) {
             <button
               className="refresh"
               onClick={() => location.reload()}
-              title="Reload files and commits; keep saved comments"
+              title="Reload files and commits; keep your view and saved comments"
             >
               ↻ <span>Refresh</span>
             </button>
@@ -1203,7 +1353,7 @@ function Review({ info }: { info: Info }) {
             className="code-pane"
             key={`${tab}:${selected}:${comparison.base}:${comparison.target}`}
           >
-            {loading || comparing ? (
+            {loading || comparing || restoring ? (
               <div className="empty">
                 <p>Loading…</p>
               </div>
@@ -1335,39 +1485,7 @@ function Review({ info }: { info: Info }) {
             >
               Preview
             </button>
-            <button
-              className="text-button"
-              disabled={!comments.length}
-              onClick={() => {
-                setClearedComments(comments);
-                setComments([]);
-                setHighlight(null);
-                setPendingComment(null);
-                setCopied(false);
-                if (editing) {
-                  setEditing(undefined);
-                  setDraft("");
-                }
-              }}
-            >
-              Clear Comments
-            </button>
           </div>
-          {clearedComments && (
-            <div className="clear-notice" role="status">
-              Comments cleared.
-              <button
-                className="text-button"
-                onClick={() => {
-                  setComments((items) => [...clearedComments, ...items]);
-                  setClearedComments(null);
-                  setCopied(false);
-                }}
-              >
-                Undo
-              </button>
-            </div>
-          )}
           <div className="comments-body">
             {copyError && (
               <p role="alert" className="error">

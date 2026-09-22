@@ -142,6 +142,24 @@ try {
   assert.deepEqual(await comments(), [
     { reference: "src/shipping.ts:6", text: "Keep the threshold at 100." },
   ]);
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
+  assert.match(await evaluate("document.querySelector('.tabs .active').textContent"), /Files/);
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+  await tree("src");
+  await browser("press", "ArrowLeft");
+  await wait(`JSON.parse(localStorage.getItem(${JSON.stringify(`difflet:view:${f.root}`)})).collapsed.includes('src/')`);
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
+  const srcFolder = "document.querySelector('file-tree-container').shadowRoot.querySelector('[role=treeitem][aria-label=src]')";
+  assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
+  await browser("fill", '[aria-label="Find a file"]', "shipping.ts");
+  await browser("press", "Control+a");
+  await browser("press", "Backspace");
+  assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
+  await tree("src");
+  await browser("press", "ArrowRight");
+  console.log("PASS Files selection and collapsed folders survive refresh; search does not overwrite expansion");
   console.log("PASS file tree → real line click → exact file:line comment");
 
   await browser("hover", ".comment");
@@ -292,6 +310,12 @@ try {
   await capture("panels-resized");
   await click("Hide file browser");
   await click("Hide comments");
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('[data-line-type="change-addition"]')`);
+  assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), true);
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
+  assert.match(await evaluate("document.querySelector('.tabs .active').textContent"), /Changes/);
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
   await click("Show file browser");
   await click("Open comment on src/shipping.ts:14");
   await wait(
@@ -421,6 +445,12 @@ try {
     `${shadow}?.querySelector('pre')?.textContent.includes('const baseRate = 5')`,
   );
   assert.doesNotMatch(await codeText(), /THRESHOLD/);
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('const baseRate = 5')`);
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Commit revision\"]').textContent"), /Add international shipping rates/);
+  await wait(`${shadow}?.querySelector('[data-diff-type="split"]')`);
+  console.log("PASS reload restores a non-default commit, its selected file and split layout");
   await click("Commit revision");
   await browser("fill", '[aria-label="Search commits"]', f.first);
   await browser("press", "Enter");
@@ -546,6 +576,12 @@ try {
   await capture("commit-picker-narrow");
   await browser("press", "Escape");
   await browser("set", "viewport", "1440", "900", "2");
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('const baseRate = 5')`);
+  assert.equal(await evaluate("document.querySelector('.code-footer').textContent.trim()"), `Commit ${f.first.slice(0, 7)}`);
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"Review source\"]').value"), "range");
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Target revision\"]').textContent"), /Introduce free shipping threshold/);
+  console.log("PASS unsubmitted range pickers survive reload without changing the applied commit");
   await click("Compare");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`,
@@ -553,6 +589,16 @@ try {
   text = await codeText();
   assert.match(text, /const baseRate = 5/);
   assert.doesNotMatch(text, /THRESHOLD = 75/);
+  await browser("fill", '[aria-label="Find a file"]', "shipping.ts");
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`);
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"Find a file\"]').value"), "shipping.ts");
+  assert.equal(await evaluate("document.querySelector('.code-footer').textContent.trim()"), `${f.first.slice(0, 7)} → ${f.third.slice(0, 7)}`);
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+  assert.doesNotMatch(await codeText(), /THRESHOLD = 75/);
+  await browser("focus", '[aria-label="Find a file"]');
+  await browser("press", "Control+a");
+  await browser("press", "Backspace");
   await capture("commit-range");
   // Custom refs remain supported, without relying on native datalist behavior.
   await click("Base revision");
@@ -642,6 +688,11 @@ try {
 
   await browser("reload");
   await wait("document.querySelectorAll('.comment').length === 3");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`);
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Base revision\"]').textContent"), /nonexistent-ref/);
+  // Refresh restores the successful comparison, not the failed draft ref.
+  await browser("select", '[aria-label="Review source"]', "working");
+  await browser("click", ".tabs button:first-child");
   // Edit an existing comment while a different file is selected: preserve its anchor.
   await tree("README.md");
   await browser("click", ".comment:first-child .comment-bottom button");
@@ -677,7 +728,7 @@ try {
     "document.querySelector('.tabs')?.textContent.includes('Changes 0')",
   );
   await tree("long.ts");
-  await wait(`${shadow}?.querySelector('[data-column-number="1"]')`);
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
   await evaluate(
     `document.querySelector('.code-view').scrollTop = 150 * parseFloat(getComputedStyle(${shadow}.querySelector('[data-column-number="1"]')).lineHeight)`,
   );
@@ -738,9 +789,10 @@ try {
     `${shadow}?.querySelector('pre')?.textContent.includes('pending = true')`,
   );
   await browser("select", '[aria-label="Review source"]', "commit");
-  await wait(
-    "document.querySelector('[aria-label=\"Commit revision\"]')?.textContent.includes('Commit created after page load')",
-  );
+  await click("Commit revision");
+  await browser("fill", '[aria-label="Search commits"]', "Commit created after page load");
+  await browser("press", "Enter");
+  await wait("document.querySelector('[aria-label=\"Commit revision\"]')?.textContent.includes('Commit created after page load')");
   assert.equal((await comments()).length, 2);
   console.log(
     "PASS clean state stays unchanged after a new commit + edit + focus; zero background API calls; refresh reveals both",
@@ -796,6 +848,8 @@ try {
   await click("Cancel");
   await browser("reload");
   await wait("document.querySelectorAll('.comment').length === 3");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`);
+  assert.match(await evaluate("document.querySelector('.file-path').textContent"), /Commit message/);
   await browser("click", ".comment:last-child p");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
@@ -812,7 +866,21 @@ try {
     "PASS full commit message, real range selection 3–4, hover, marker reopen, exact mixed clipboard, reload navigation",
   );
 
-  await click("Clear Comments");
+  await click("Mark reviewed");
+  await resizePanel("files", 60);
+  await click("Hide comments");
+  await evaluate("localStorage.setItem('difflet:comments:/another-repo', 'keep me')");
+  const beforeReset = await evaluate("JSON.stringify({...localStorage})");
+  await click("Reset");
+  assert.match(JSON.stringify(await browser("dialog", "status")), /All comments, review progress and view settings/);
+  await browser("dialog", "dismiss");
+  assert.equal(await evaluate("JSON.stringify({...localStorage})"), beforeReset);
+  assert.equal((await comments()).length, 3);
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
+  await capture("reset-cancelled");
+  await click("Reset");
+  await browser("dialog", "accept");
+  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
   assert.deepEqual(await comments(), []);
   assert.equal(
     await evaluate("document.querySelector('.copy').disabled"),
@@ -822,19 +890,19 @@ try {
     await evaluate("document.querySelectorAll('.comment-marker').length"),
     0,
   );
-  await capture("comments-cleared");
-  await line(1);
-  await browser("fill", "#comment-text", "Shorten the subject.");
-  await click("Add comment");
-  await click("Undo");
-  assert.equal((await comments()).length, 4);
-  assert.equal((await comments())[3].text, "Shorten the subject.");
-  await click("Clear Comments");
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
+  assert.equal(await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width"), 232);
+  assert.equal(await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width"), 310);
+  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(`difflet:reviewed:${f.root}`)})`), "{}");
+  assert.equal(await evaluate("localStorage.getItem('difflet:comments:/another-repo')"), "keep me");
+  assert.doesNotMatch(await evaluate("document.body.textContent"), /Clear Comments|Undo/);
+  await capture("review-reset");
   await browser("reload");
   await wait("document.querySelector('.comments-panel')");
   assert.deepEqual(await comments(), []);
   console.log(
-    "PASS Clear Comments removes markers and disables copy; Undo preserves new comments; clearing persists across reload",
+    "PASS Reset confirmation cancels without changes; confirmed reset clears comments, progress and view state only for this repository, persists across reload",
   );
 
   f.git(
@@ -849,6 +917,9 @@ try {
   await wait("document.querySelector('.tabs')");
   await click("Changes 1");
   await browser("select", '[aria-label="Review source"]', "commit");
+  await click("Commit revision");
+  await browser("fill", '[aria-label="Search commits"]', "Document the decision");
+  await browser("press", "Enter");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
   );
@@ -1028,6 +1099,9 @@ try {
   await click("Changes 1");
   assert.equal(await reviewedText(), "");
   await browser("select", '[aria-label="Review source"]', "commit");
+  await click("Commit revision");
+  await browser("fill", '[aria-label="Search commits"]', "Document the decision");
+  await browser("press", "Enter");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
   );
@@ -1035,6 +1109,25 @@ try {
   console.log(
     "PASS Reviewed moves files and messages without duplicates; search, selection, undo, per-comparison isolation, historical persistence and mutable-view refresh reset",
   );
+  // Old/corrupt UI state must not prevent opening or resetting a repository.
+  const viewKey = JSON.stringify(`difflet:view:${f.root}`);
+  await evaluate(`localStorage.setItem(${viewKey}, '{broken')`);
+  await browser("reload");
+  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  assert.equal((await comments()).length, 1);
+  await evaluate(`localStorage.setItem(${viewKey}, JSON.stringify({tab:'obsolete', split:'wrong-type', collapsed:null, selected:'deleted-file.ts', futureField:'unused'}))`);
+  await browser("reload");
+  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
+  assert.equal(await evaluate(`'futureField' in JSON.parse(localStorage.getItem(${viewKey}))`), false);
+  await evaluate(`localStorage.setItem(${viewKey}, JSON.stringify({tab:'changes', mode:'commit', appliedMode:'commit', target:'missing-commit', selected:'src/shipping.ts'}))`);
+  await browser("reload");
+  await wait("document.querySelector('[role=alert]')?.textContent.includes('Unknown commit')");
+  await click("Reset");
+  await browser("dialog", "accept");
+  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  assert.deepEqual(await comments(), []);
+  console.log("PASS corrupt/obsolete view state falls back safely; missing commits remain recoverable with Reset");
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);
   console.log("PASS no browser errors\nBrowser verification complete.");

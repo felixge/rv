@@ -65,7 +65,7 @@ folders also support browsing and commenting, without the Changes view.
 - Small chevrons in each panel header hide it; a narrow rail at the same edge
   lets you reopen it. Drag the panels'
   inner edges to resize (or focus a divider and use arrow keys). Widths survive
-  hiding/reopening within the page; limits keep room for the diff. Selecting lines
+  refresh and hiding/reopening; limits keep room for the diff. Selecting lines
   or clicking an inline comment marker automatically reopens Comments. Hiding a
   panel keeps its state, including an unfinished comment draft.
 - Click a **line number** to comment. Shift-click or drag across line numbers
@@ -77,8 +77,9 @@ folders also support browsing and commenting, without the Changes view.
 - **Copy Prompt** copies all saved comments, across files and comparisons, in
   order, without opening a modal. Preview is a separate action for inspecting
   or manually copying the text if clipboard access is unavailable.
-- **Clear Comments** removes all saved comments for this repository. **Undo**
-  restores the last cleared set until the page is refreshed.
+- **Reset**, next to Copy Prompt, restores the initial screen and deletes all
+  comments, review progress, and view settings for this repository after
+  confirmation. Other repositories are unaffected. There is no undo.
 
 The output has no preamble or agent instructions:
 
@@ -102,12 +103,17 @@ of a file path; their line numbers include the subject and blank lines.
 There are no watchers, polling timers, focus refreshes, or live subscriptions.
 The file list, working change list, and recent commits load when the page opens.
 File contents load on selection and are cached until the page reloads. Historical
-comparisons load only when you choose them. **Refresh** (or browser reload) reads
-new state, including when the previous state had no commits or changes.
+comparisons load when you choose or restore them. **Refresh** (or browser reload)
+reads new repository data while keeping the Files/Changes tab, selected file or
+commit message, commit/range, file search, collapsed folders, diff layout, and
+panel visibility and widths. Unsubmitted range picker values are kept separately
+from the comparison on screen. Applied historical comparisons stay pinned to
+their resolved commits, even if a branch or tag moves.
 
-Saved comments live in browser local storage, keyed by repository path, and survive
-reloads. They are separate for each browser/origin/port. Unsaved drafts are not
-persisted. Nothing is written into your repository.
+Saved comments and a small view snapshot live in browser local storage, keyed by
+repository path, and survive reloads. File contents and fetched comparisons are
+not stored in the view snapshot. State is separate for each browser/origin/port.
+Unsaved drafts are not persisted. Nothing is written into your repository.
 
 Binary files, symlinks, submodules, and files over 2 MiB show a preview notice rather
 than being rendered. The layout is intended for desktop code review.
