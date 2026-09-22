@@ -411,6 +411,7 @@ function BrowserTree({
   onSelect,
   reviewed,
   onToggleReviewed,
+  onToggleDirectoryReviewed,
   search,
   collapsed,
   onCollapse,
@@ -421,15 +422,18 @@ function BrowserTree({
   onSelect: (path: string) => void;
   reviewed: boolean;
   onToggleReviewed: (path: string) => void;
+  onToggleDirectoryReviewed: (directory: string) => void;
   search: string;
   collapsed: string[];
   onCollapse: (path: string, closed: boolean) => void;
 }) {
   const selectRef = useRef(onSelect);
   const toggleReviewedRef = useRef(onToggleReviewed);
+  const toggleDirectoryRef = useRef(onToggleDirectoryReviewed);
   const collapseRef = useRef(onCollapse);
   const searchRef = useRef(search);
   toggleReviewedRef.current = onToggleReviewed;
+  toggleDirectoryRef.current = onToggleDirectoryReviewed;
   collapseRef.current = onCollapse;
   searchRef.current = search;
   const syncingSelection = useRef(false);
@@ -456,6 +460,8 @@ function BrowserTree({
         onOpen: (item, context) => {
           context.close({ restoreFocus: false });
           if (item.kind === "file") toggleReviewedRef.current(item.path);
+          else if (item.kind === "directory")
+            toggleDirectoryRef.current(item.path);
         },
       },
     },
@@ -540,9 +546,10 @@ function BrowserTree({
         const hovered = root.querySelector(
           '[data-type="item"][data-item-context-hover="true"]',
         );
+        const type = hovered?.getAttribute("data-item-type");
         host.toggleAttribute(
           "data-file-review-action",
-          hovered?.getAttribute("data-item-type") === "file",
+          type === "file" || type === "folder",
         );
         const trigger = root.querySelector('[data-type="context-menu-trigger"]');
         trigger?.setAttribute("aria-label", label);
@@ -967,7 +974,7 @@ function Review({ info }: { info: Info }) {
   const keySequenceTimer = useRef<number | undefined>(undefined);
   const reviewHistory = useRef<{
     scope: string;
-    path: string;
+    paths: string[];
     reviewed: boolean;
   }[]>([]);
   useEffect(() => {
@@ -1416,7 +1423,7 @@ function Review({ info }: { info: Info }) {
     const wasReviewed = reviewedInView?.includes(path) || false;
     reviewHistory.current.push({
       scope: reviewScope,
-      path,
+      paths: [path],
       reviewed: wasReviewed,
     });
     if (advance && !wasReviewed) moveFile(1);
@@ -1428,6 +1435,26 @@ function Review({ info }: { info: Info }) {
     }));
   }
 
+  function toggleDirectoryReviewed(directory: string) {
+    if (loading || comparing) return;
+    const files = paths.filter((path) => path.startsWith(directory));
+    if (!files.length) return;
+    const wasReviewed = files.every((path) => reviewedInView?.includes(path));
+    reviewHistory.current.push({
+      scope: reviewScope,
+      paths: files,
+      reviewed: wasReviewed,
+    });
+    setReviewed((current) => ({
+      ...current,
+      [reviewScope]: wasReviewed
+        ? (current[reviewScope] || []).filter(
+            (item) => !files.includes(item),
+          )
+        : [...new Set([...(current[reviewScope] || []), ...files])],
+    }));
+  }
+
   function toggleReviewed() {
     togglePathReviewed(selected, true);
   }
@@ -1436,18 +1463,20 @@ function Review({ info }: { info: Info }) {
     const action = reviewHistory.current.pop();
     if (!action) return;
     setReviewed((current) => {
-      const paths = current[action.scope] || [];
+      const reviewed = current[action.scope] || [];
       return {
         ...current,
         [action.scope]: action.reviewed
-          ? [...new Set([...paths, action.path])]
-          : paths.filter((path) => path !== action.path),
+          ? [...new Set([...reviewed, ...action.paths])]
+          : reviewed.filter((path) => !action.paths.includes(path)),
       };
     });
-    if (
-      action.scope === reviewScope &&
-      (action.path === MESSAGE_PATH || paths.includes(action.path))
-    ) select(action.path);
+    if (action.scope === reviewScope) {
+      const restored = action.paths.find(
+        (path) => path === MESSAGE_PATH || paths.includes(path),
+      );
+      if (restored) select(restored);
+    }
   }
 
   const reviewItems = useMemo(() => {
@@ -1791,6 +1820,7 @@ function Review({ info }: { info: Info }) {
                     onSelect={select}
                     reviewed={done}
                     onToggleReviewed={togglePathReviewed}
+                    onToggleDirectoryReviewed={toggleDirectoryReviewed}
                     search={search}
                     collapsed={collapsed}
                     onCollapse={(path, closed) =>

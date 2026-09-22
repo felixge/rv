@@ -133,6 +133,27 @@ try {
   await wait(
     "document.querySelector('section[aria-label=Unreviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=\"README.md\"]')",
   );
+  await hoverTree("src");
+  await wait(
+    "document.querySelector('section[aria-label=Unreviewed] file-tree-container').hasAttribute('data-file-review-action') && document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"][data-visible=true]')",
+  );
+  await evaluate(
+    "document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"]').click()",
+  );
+  await wait(
+    "['discount.ts','shipping.ts'].every(p => document.querySelector('section[aria-label=Reviewed] file-tree-container')?.shadowRoot?.querySelector(`[role=treeitem][aria-label=\"${p}\"]`))",
+  );
+  await hoverTree("src", "Reviewed");
+  await wait(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container').hasAttribute('data-file-review-action') && document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark unreviewed\"][data-visible=true]')",
+  );
+  await evaluate(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark unreviewed\"]').click()",
+  );
+  await wait(
+    "['discount.ts','shipping.ts'].every(p => document.querySelector('section[aria-label=Unreviewed] file-tree-container')?.shadowRoot?.querySelector(`[role=treeitem][aria-label=\"${p}\"]`))",
+  );
+  console.log("PASS directory review action toggles files recursively");
   await browser("press", "?");
   await browser("wait", '[aria-label="Search keyboard shortcuts"]');
   assert.equal(
