@@ -55,6 +55,129 @@ type Comment = {
 };
 type Content = { oldFile: Source; newFile: Source };
 
+type Shortcut = {
+  keys: string[];
+  label: string;
+  category: "Navigate" | "Review" | "View" | "General";
+};
+const shortcuts: Shortcut[] = [
+  { keys: ["?"], label: "Show keyboard shortcuts", category: "General" },
+  { keys: ["/"], label: "Search files", category: "Navigate" },
+  { keys: ["J"], label: "Next file", category: "Navigate" },
+  { keys: ["K"], label: "Previous file", category: "Navigate" },
+  { keys: ["G", "F"], label: "Go to Files", category: "Navigate" },
+  { keys: ["G", "C"], label: "Go to Changes", category: "Navigate" },
+  { keys: ["L"], label: "Comment on a line or range", category: "Review" },
+  { keys: ["R"], label: "Toggle reviewed", category: "Review" },
+  { keys: ["⌘/Ctrl", "Enter"], label: "Save comment", category: "Review" },
+  { keys: ["Y"], label: "Copy review prompt", category: "Review" },
+  { keys: ["P"], label: "Preview review prompt", category: "Review" },
+  { keys: ["V"], label: "Toggle unified / split diff", category: "View" },
+  { keys: ["B"], label: "Toggle file browser", category: "View" },
+  { keys: ["C"], label: "Toggle comments", category: "View" },
+  { keys: ["Shift", "R"], label: "Refresh repository", category: "General" },
+  { keys: ["Esc"], label: "Close or cancel", category: "General" },
+];
+function compareTreeSegments(left: string, right: string) {
+  const leftLower = left.toLowerCase();
+  const rightLower = right.toLowerCase();
+  const leftTokens = leftLower.match(/\d+|\D+/g) || [];
+  const rightTokens = rightLower.match(/\d+|\D+/g) || [];
+  for (let index = 0; index < Math.min(leftTokens.length, rightTokens.length); index++) {
+    const leftToken = leftTokens[index];
+    const rightToken = rightTokens[index];
+    if (leftToken === rightToken) continue;
+    const leftNumber = /^\d+$/.test(leftToken);
+    const rightNumber = /^\d+$/.test(rightToken);
+    if (leftNumber && rightNumber) {
+      const comparison = Number(leftToken) - Number(rightToken);
+      if (comparison) return comparison;
+      continue;
+    }
+    return leftToken < rightToken ? -1 : 1;
+  }
+  if (leftTokens.length !== rightTokens.length)
+    return leftTokens.length - rightTokens.length;
+  if (leftLower !== rightLower) return leftLower < rightLower ? -1 : 1;
+  return left < right ? -1 : left === right ? 0 : 1;
+}
+
+function compareTreePaths(left: string, right: string) {
+  const leftParts = left.split("/");
+  const rightParts = right.split("/");
+  const sharedDepth = Math.min(leftParts.length, rightParts.length);
+  for (let depth = 0; depth < sharedDepth; depth++) {
+    const leftPart = leftParts[depth];
+    const rightPart = rightParts[depth];
+    if (leftPart === rightPart) continue;
+    const leftIsDirectory = depth < leftParts.length - 1;
+    const rightIsDirectory = depth < rightParts.length - 1;
+    if (leftIsDirectory !== rightIsDirectory) return leftIsDirectory ? -1 : 1;
+    const comparison = compareTreeSegments(leftPart, rightPart);
+    if (comparison) return comparison;
+    return leftPart < rightPart ? -1 : 1;
+  }
+  return leftParts.length - rightParts.length;
+}
+
+function treeOrdered(paths: string[]) {
+  return [...paths].sort(compareTreePaths);
+}
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const normalized = query.trim().toLowerCase();
+  const matches = shortcuts.filter((shortcut) =>
+    `${shortcut.label} ${shortcut.category} ${shortcut.keys.join(" ")}`
+      .toLowerCase()
+      .includes(normalized),
+  );
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <section
+        className="shortcut-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcut-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="shortcut-heading">
+          <div>
+            <h2 id="shortcut-title">Keyboard shortcuts</h2>
+            <p>Keep your hands on the keyboard.</p>
+          </div>
+          <button onClick={onClose} aria-label="Close keyboard shortcuts">✕</button>
+        </div>
+        <div className="shortcut-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            autoFocus
+            aria-label="Search keyboard shortcuts"
+            placeholder="Search shortcuts…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        <div className="shortcut-list">
+          {matches.map((shortcut) => (
+            <div className="shortcut-row" key={shortcut.label}>
+              <span className="shortcut-label">
+                {shortcut.label}
+                <small>{shortcut.category}</small>
+              </span>
+              <span className="shortcut-keys">
+                {shortcut.keys.map((key) => <kbd key={key}>{key}</kbd>)}
+              </span>
+            </div>
+          ))}
+          {!matches.length && <p className="shortcut-empty">No shortcuts found.</p>}
+        </div>
+        <p className="shortcut-note">Shortcuts are paused while you type in a field.</p>
+      </section>
+    </div>
+  );
+}
+
 function readView(info: Info) {
   const defaults = {
     tab: "files",
@@ -601,6 +724,11 @@ function Review({ info }: { info: Info }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showLinePicker, setShowLinePicker] = useState(false);
+  const [lineTarget, setLineTarget] = useState("");
+  const [lineSide, setLineSide] = useState<"additions" | "deletions">("additions");
+  const [lineError, setLineError] = useState("");
   const [showFiles, setShowFiles] = useState(saved.showFiles);
   const [showComments, setShowComments] = useState(saved.showComments);
   const [filesWidth, setFilesWidth] = useState(saved.filesWidth);
@@ -610,6 +738,8 @@ function Review({ info }: { info: Info }) {
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const comparisonRequest = useRef(0);
+  const keySequence = useRef("");
+  const keySequenceTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (saved.appliedMode !== "working")
       void compare(saved.appliedMode, saved.target, saved.base, true).finally(
@@ -1043,6 +1173,135 @@ function Review({ info }: { info: Info }) {
     }
   }
 
+  function toggleReviewed() {
+    if (!selected || !(messageView || paths.includes(selected)) || loading || comparing)
+      return;
+    setReviewed((current) => ({
+      ...current,
+      [reviewScope]: selectedReviewed
+        ? (current[reviewScope] || []).filter((path) => path !== selected)
+        : [...(current[reviewScope] || []), selected],
+    }));
+  }
+
+  function moveFile(offset: number) {
+    const reviewItems = [
+      ...(hasMessage && !messageReviewed ? [MESSAGE_PATH] : []),
+      ...treeOrdered(unreviewedPaths),
+      ...(hasMessage && messageReviewed ? [MESSAGE_PATH] : []),
+      ...treeOrdered(reviewedPaths),
+    ];
+    if (!reviewItems.length) return;
+    const current = reviewItems.indexOf(selected);
+    const next = current < 0
+      ? (offset > 0 ? 0 : reviewItems.length - 1)
+      : (current + offset + reviewItems.length) % reviewItems.length;
+    select(reviewItems[next]);
+  }
+
+  function selectLineTarget() {
+    const match = lineTarget.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!match) {
+      setLineError("Enter a line number or range, such as 12 or 12-15.");
+      return;
+    }
+    const first = Number(match[1]);
+    const last = Number(match[2] || match[1]);
+    const source = lineSide === "deletions" ? content?.oldFile : content?.newFile;
+    const lineCount = source?.contents ? source.contents.split("\n").length : 0;
+    if (first < 1 || last < 1 || first > lineCount || last > lineCount) {
+      setLineError(`Choose a line between 1 and ${lineCount}.`);
+      return;
+    }
+    const nextRange: SelectedLineRange = {
+      start: Math.min(first, last),
+      end: Math.max(first, last),
+      ...(tab === "changes" && !messageView ? { side: lineSide } : {}),
+    };
+    setShowLinePicker(false);
+    setShowComments(true);
+    setLineError("");
+    onSelection(nextRange);
+    requestAnimationFrame(() => viewer.current?.scrollTo({
+      type: "range",
+      id: selected,
+      range: nextRange,
+      align: "center",
+    }));
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const typing = target.matches("input, textarea, select, [contenteditable=true]");
+      const modifier = event.metaKey || event.ctrlKey || event.altKey;
+
+      if (event.key === "Escape") {
+        if (showShortcuts || showLinePicker || showPrompt) {
+          event.preventDefault();
+          setShowShortcuts(false);
+          setShowLinePicker(false);
+          setShowPrompt(false);
+        } else if (editing || range) {
+          event.preventDefault();
+          setEditing(undefined);
+          setRange(null);
+          setDraft("");
+        }
+        return;
+      }
+      if (typing || modifier || showShortcuts || showLinePicker || showPrompt) return;
+
+      const key = event.key.toLowerCase();
+      if (keySequence.current === "g") {
+        keySequence.current = "";
+        window.clearTimeout(keySequenceTimer.current);
+        if (key === "f" || key === "c") {
+          event.preventDefault();
+          changeTab(key === "f" ? "files" : "changes");
+        }
+        return;
+      }
+      if (key === "g") {
+        event.preventDefault();
+        keySequence.current = "g";
+        keySequenceTimer.current = window.setTimeout(() => {
+          keySequence.current = "";
+        }, 1000);
+        return;
+      }
+
+      const handled = ["?", "/", "j", "k", "l", "r", "y", "p", "v", "b", "c"];
+      if (!handled.includes(key)) return;
+      event.preventDefault();
+      if (key === "?") setShowShortcuts(true);
+      else if (key === "/") {
+        setShowFiles(true);
+        requestAnimationFrame(() =>
+          document.querySelector<HTMLInputElement>('[aria-label="Find a file"]')?.focus(),
+        );
+      } else if (key === "j") moveFile(1);
+      else if (key === "k") moveFile(-1);
+      else if (key === "l" && content && !notice) {
+        setLineTarget(range ? `${start}${end !== start ? `-${end}` : ""}` : "");
+        setLineSide(range?.side === "deletions" ? "deletions" : "additions");
+        setLineError("");
+        setShowLinePicker(true);
+      } else if (key === "r" && event.shiftKey) location.reload();
+      else if (key === "r") toggleReviewed();
+      else if (key === "y" && comments.length) void copyPrompt();
+      else if (key === "p" && comments.length) setShowPrompt(true);
+      else if (key === "v" && tab === "changes" && !messageView) setSplit((value) => !value);
+      else if (key === "b") setShowFiles((value) => !value);
+      else if (key === "c") setShowComments((value) => !value);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      window.clearTimeout(keySequenceTimer.current);
+    };
+  });
+
   return (
     <div className="app">
       <header className="topbar">
@@ -1055,6 +1314,14 @@ function Review({ info }: { info: Info }) {
         </span>
         {info.branch && <span className="branch">⑂ {info.branch}</span>}
         <div className="top-actions">
+          <button
+            className="shortcut-trigger"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            onClick={() => setShowShortcuts(true)}
+          >
+            ?
+          </button>
           <button className="reset" onClick={reset}>
             Reset
           </button>
@@ -1329,16 +1596,7 @@ function Review({ info }: { info: Info }) {
                     ? "Move back to unreviewed"
                     : "Move to Reviewed"
                 }
-                onClick={() =>
-                  setReviewed((current) => ({
-                    ...current,
-                    [reviewScope]: selectedReviewed
-                      ? (current[reviewScope] || []).filter(
-                          (path) => path !== selected,
-                        )
-                      : [...(current[reviewScope] || []), selected],
-                  }))
-                }
+                onClick={toggleReviewed}
               >
                 {selectedReviewed ? "✓ Reviewed" : "Mark reviewed"}
               </button>
@@ -1550,6 +1808,15 @@ function Review({ info }: { info: Info }) {
                       autoFocus
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (
+                          (event.metaKey || event.ctrlKey) &&
+                          event.key === "Enter"
+                        ) {
+                          event.preventDefault();
+                          saveComment();
+                        }
+                      }}
                     />
                     <button
                       onClick={() => {
@@ -1710,6 +1977,55 @@ function Review({ info }: { info: Info }) {
               </button>
             </div>
           </section>
+        </div>
+      )}
+      {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)} />}
+      {showLinePicker && (
+        <div className="modal-backdrop" onClick={() => setShowLinePicker(false)}>
+          <form
+            className="line-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="line-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              selectLineTarget();
+            }}
+          >
+            <div className="panel-heading">
+              <h2 id="line-dialog-title">Comment on a line</h2>
+              <button type="button" onClick={() => setShowLinePicker(false)} aria-label="Close line picker">✕</button>
+            </div>
+            <div className="line-dialog-body">
+              <label htmlFor="line-target">Line or range</label>
+              <input
+                id="line-target"
+                autoFocus
+                inputMode="numeric"
+                placeholder="12 or 12-15"
+                value={lineTarget}
+                onChange={(event) => {
+                  setLineTarget(event.target.value);
+                  setLineError("");
+                }}
+              />
+              {tab === "changes" && !messageView && (
+                <label className="line-side">
+                  Side
+                  <select value={lineSide} onChange={(event) => setLineSide(event.target.value as "additions" | "deletions")}>
+                    <option value="additions">New side</option>
+                    <option value="deletions">Old side</option>
+                  </select>
+                </label>
+              )}
+              {lineError && <p role="alert" className="line-error">{lineError}</p>}
+            </div>
+            <div className="dialog-footer">
+              <span>{selected}</span>
+              <button className="primary" disabled={!lineTarget.trim()}>Start comment</button>
+            </div>
+          </form>
         </div>
       )}
     </div>

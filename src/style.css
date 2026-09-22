@@ -138,6 +138,14 @@ code {
   align-items: center;
   gap: 24px;
 }
+.shortcut-trigger {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  color: #677487;
+  font-weight: 700;
+}
 .copy {
   display: flex;
   align-items: center;
@@ -890,6 +898,139 @@ button.panel-toggle:hover {
   border-radius: 9px;
   overflow: hidden;
   box-shadow: 0 24px 80px #132a4660;
+}
+.shortcut-dialog,
+.line-dialog {
+  width: min(600px, 90vw);
+  max-height: min(720px, 88vh);
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px #132a4660;
+}
+.shortcut-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  padding: 22px 24px 18px;
+}
+.shortcut-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  color: #303b49;
+}
+.shortcut-heading p {
+  margin: 5px 0 0;
+  color: #8b95a2;
+  font-size: 11px;
+}
+.shortcut-heading button {
+  border: 0;
+  background: transparent;
+}
+.shortcut-search {
+  display: flex;
+  align-items: center;
+  margin: 0 24px 12px;
+  padding-left: 11px;
+  border: 1px solid #dce2e9;
+  border-radius: 6px;
+  color: #8c97a5;
+}
+.shortcut-search:focus-within {
+  outline: 2px solid #86b7e9;
+  outline-offset: 2px;
+}
+.shortcut-search input {
+  width: 100%;
+  padding: 9px;
+  border: 0;
+  outline: 0;
+}
+.shortcut-list {
+  max-height: min(470px, 58vh);
+  overflow: auto;
+  padding: 0 24px;
+}
+.shortcut-row {
+  min-height: 49px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid #edf0f3;
+}
+.shortcut-label {
+  font-size: 12px;
+  color: #414b58;
+}
+.shortcut-label small {
+  display: block;
+  margin-top: 3px;
+  color: #99a1ac;
+  font-size: 9px;
+}
+.shortcut-keys {
+  display: flex;
+  gap: 5px;
+}
+kbd {
+  min-width: 27px;
+  padding: 4px 7px;
+  border: 1px solid #d8dde4;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: #f7f8fa;
+  color: #56616f;
+  font: 10px "IBM Plex Mono", monospace;
+  text-align: center;
+}
+.shortcut-note {
+  margin: 12px 24px 0;
+  padding: 12px 0 18px;
+  border-top: 1px solid #edf0f3;
+  color: #99a1ac;
+  font-size: 10px;
+}
+.shortcut-empty {
+  padding: 35px 0;
+  text-align: center;
+  color: #8c96a3;
+  font-size: 12px;
+}
+.line-dialog {
+  width: min(420px, 90vw);
+}
+.line-dialog-body {
+  padding: 20px;
+  display: grid;
+  gap: 9px;
+}
+.line-dialog-body > label {
+  color: #697585;
+  font-size: 11px;
+  font-weight: 600;
+}
+.line-dialog-body > input {
+  padding: 9px 10px;
+  font-family: "IBM Plex Mono", monospace;
+}
+.line-side {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  margin-top: 5px;
+}
+.line-error {
+  margin: 3px 0 0;
+  color: #a93434;
+  font-size: 11px;
+}
+.line-dialog .dialog-footer span {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .prompt-dialog textarea {
   width: 100%;

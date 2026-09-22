@@ -71,6 +71,10 @@ folders also support browsing and commenting, without the Changes view.
 - Click a **line number** to comment. Shift-click or drag across line numbers
   for a range. Save with **Add comment** or **Ctrl/Cmd+Enter**. Edit and delete
   saved comments in the right panel.
+- Press **?** for a searchable keyboard shortcut guide. Common review actions
+  are available without a mouse, including `J`/`K` file navigation, `L` to
+  select a line or range for commenting, `/` to search files, and `R` to mark
+  the current file reviewed.
 - Commented lines have clickable markers that open the comment in the right
   panel. Hover a comment to highlight its lines in the matching view; click it
   to open its file/comparison and scroll to the range.

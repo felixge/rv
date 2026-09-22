@@ -104,6 +104,20 @@ try {
   await browser("open", url);
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");
+  await browser("press", "?");
+  await browser("wait", '[aria-label="Search keyboard shortcuts"]');
+  assert.equal(
+    await evaluate("document.querySelector('[role=dialog]').getAttribute('aria-labelledby')"),
+    "shortcut-title",
+  );
+  await browser("fill", '[aria-label="Search keyboard shortcuts"]', "copy");
+  assert.deepEqual(
+    await evaluate("Array.from(document.querySelectorAll('.shortcut-row')).map(e => e.textContent.trim())"),
+    ["Copy review promptReviewY"],
+  );
+  await capture("keyboard-shortcuts-search");
+  await browser("press", "Escape");
+  await wait("!document.querySelector('.shortcut-dialog')");
   assert.equal(await lineStats(), "6 lines added, 3 lines removed");
   assert.equal(
     await evaluate(
@@ -132,6 +146,62 @@ try {
   );
   await capture("search-focus");
   await tree("shipping.ts");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
+  await browser("press", "l");
+  await browser("wait", "#line-target");
+  await capture("keyboard-line-picker");
+  await browser("fill", "#line-target", "6");
+  await browser("press", "Enter");
+  await browser("wait", "#comment-text");
+  assert.equal(
+    await evaluate("document.querySelector('.composer code').textContent"),
+    "src/shipping.ts:6",
+  );
+  await browser("press", "Escape");
+  await wait("!document.querySelector('.composer')");
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent !== 'src/shipping.ts'");
+  await browser("press", "k");
+  await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
+  await browser("press", "r");
+  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'true'");
+  await browser("press", "r");
+  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'false'");
+  await browser("press", "b");
+  assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), true);
+  await browser("press", "b");
+  assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), false);
+  await browser("press", "c");
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
+  await browser("press", "c");
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
+  await browser("press", "g");
+  await browser("press", "c");
+  await wait("document.querySelector('.tabs .active').textContent.includes('Changes')");
+  await browser("press", "v");
+  assert.equal(
+    await evaluate("document.querySelector('.segmented button:last-child').getAttribute('aria-pressed')"),
+    "true",
+  );
+  await browser("press", "v");
+  await browser("press", "g");
+  await browser("press", "f");
+  await wait("document.querySelector('.tabs .active').textContent.includes('Files')");
+  await tree("README.md");
+  await wait("document.querySelector('.file-path').textContent === 'README.md'");
+  await browser("press", "r");
+  await wait("document.querySelector('.review-toggle').getAttribute('aria-pressed') === 'true'");
+  await tree(".gitignore");
+  await wait("document.querySelector('.file-path').textContent === '.gitignore'");
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent === 'README.md'");
+  await browser("press", "j");
+  await wait("document.querySelector('.file-path').textContent === 'src/discount.ts'");
+  await browser("press", "k");
+  await wait("document.querySelector('.file-path').textContent === 'README.md'");
+  await browser("press", "r");
+  await tree("shipping.ts");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
   await line(6);
   assert.equal(
     await evaluate("document.querySelector('.composer code').textContent"),
@@ -161,6 +231,7 @@ try {
   await browser("press", "ArrowRight");
   console.log("PASS Files selection and collapsed folders survive refresh; search does not overwrite expansion");
   console.log("PASS file tree → real line click → exact file:line comment");
+  console.log("PASS shortcuts follow sidebar tree order across unreviewed/reviewed sections and wrap");
 
   await browser("hover", ".comment");
   assert.deepEqual(await highlightedLines(), [6]);
