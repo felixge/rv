@@ -30,6 +30,16 @@ const click = (name) =>
   browser("find", "role", "button", "click", "--name", name, "--exact");
 const tree = (name) =>
   browser("find", "role", "treeitem", "click", "--name", name, "--exact");
+async function hoverTree(name, section = "Unreviewed") {
+  const point = await evaluate(`(() => {
+    const tree = document.querySelector('section[aria-label="${section}"] file-tree-container');
+    const item = Array.from(tree.shadowRoot.querySelectorAll('[role=treeitem]'))
+      .find(item => item.getAttribute('aria-label') === ${JSON.stringify(name)});
+    const rect = item.getBoundingClientRect();
+    return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
+  })()`);
+  await browser("mouse", "move", String(point.x), String(point.y));
+}
 const shadow = "document.querySelector('diffs-container')?.shadowRoot";
 const lineStats = (section = "Unreviewed") =>
   evaluate(
@@ -104,6 +114,25 @@ try {
   await browser("open", url);
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");
+  await hoverTree("README.md");
+  await wait(
+    "document.querySelector('section[aria-label=Unreviewed] file-tree-container').hasAttribute('data-file-review-action') && document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"][data-visible=true]')",
+  );
+  await browser("find", "role", "button", "click", "--name", "Mark reviewed", "--exact");
+  await wait(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=\"README.md\"]')",
+  );
+  await hoverTree("README.md", "Reviewed");
+  await wait(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container').hasAttribute('data-file-review-action') && document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark unreviewed\"][data-visible=true]')",
+  );
+  await capture("file-review-hover-action");
+  await evaluate(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark unreviewed\"]').click()",
+  );
+  await wait(
+    "document.querySelector('section[aria-label=Unreviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=\"README.md\"]')",
+  );
   await browser("press", "?");
   await browser("wait", '[aria-label="Search keyboard shortcuts"]');
   assert.equal(

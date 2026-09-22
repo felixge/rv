@@ -408,6 +408,8 @@ function BrowserTree({
   entries,
   selected,
   onSelect,
+  reviewed,
+  onToggleReviewed,
   search,
   collapsed,
   onCollapse,
@@ -416,13 +418,17 @@ function BrowserTree({
   entries: Entry[];
   selected: string;
   onSelect: (path: string) => void;
+  reviewed: boolean;
+  onToggleReviewed: (path: string) => void;
   search: string;
   collapsed: string[];
   onCollapse: (path: string, closed: boolean) => void;
 }) {
   const selectRef = useRef(onSelect);
+  const toggleReviewedRef = useRef(onToggleReviewed);
   const collapseRef = useRef(onCollapse);
   const searchRef = useRef(search);
+  toggleReviewedRef.current = onToggleReviewed;
   collapseRef.current = onCollapse;
   searchRef.current = search;
   const syncingSelection = useRef(false);
@@ -441,6 +447,28 @@ function BrowserTree({
       const item = items.at(-1);
       if (item) selectRef.current(item);
     },
+    composition: {
+      contextMenu: {
+        enabled: true,
+        triggerMode: "button",
+        buttonVisibility: "when-needed",
+        onOpen: (item, context) => {
+          context.close({ restoreFocus: false });
+          if (item.kind === "file") toggleReviewedRef.current(item.path);
+        },
+      },
+    },
+    unsafeCSS: `
+      :host(:not([data-file-review-action])) [data-type="context-menu-anchor"] {
+        display: none !important;
+      }
+      [data-type="context-menu-trigger"] svg { display: none; }
+      [data-type="context-menu-trigger"]::before {
+        content: "${reviewed ? "↩" : "✓"}";
+        font-size: 13px;
+        font-weight: 600;
+      }
+    `,
     gitStatus: entries.map((entry) => ({
       path: entry.path,
       status: statuses[entry.status] || "modified",
@@ -500,6 +528,40 @@ function BrowserTree({
     if (item && !item.isSelected()) item.select();
     syncingSelection.current = false;
   }, [model, selected, paths]);
+  useEffect(() => {
+    let observer: MutationObserver | undefined;
+    const frame = requestAnimationFrame(() => {
+      const host = model.getFileTreeContainer();
+      const root = host?.shadowRoot;
+      if (!host || !root) return;
+      const label = reviewed ? "Mark unreviewed" : "Mark reviewed";
+      const updateAction = () => {
+        const hovered = root.querySelector(
+          '[data-type="item"][data-item-context-hover="true"]',
+        );
+        host.toggleAttribute(
+          "data-file-review-action",
+          hovered?.getAttribute("data-item-type") === "file",
+        );
+        const trigger = root.querySelector('[data-type="context-menu-trigger"]');
+        trigger?.setAttribute("aria-label", label);
+        trigger?.setAttribute("title", label);
+        trigger?.removeAttribute("aria-haspopup");
+      };
+      observer = new MutationObserver(updateAction);
+      observer.observe(root, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["data-item-context-hover"],
+      });
+      updateAction();
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [model, reviewed]);
   return (
     <FileTree
       model={model}
@@ -1347,21 +1409,26 @@ function Review({ info }: { info: Info }) {
     }
   }
 
-  function toggleReviewed() {
-    if (!selected || !(messageView || paths.includes(selected)) || loading || comparing)
+  function togglePathReviewed(path: string, advance = false) {
+    if (!path || !(path === MESSAGE_PATH || paths.includes(path)) || loading || comparing)
       return;
+    const wasReviewed = reviewedInView?.includes(path) || false;
     reviewHistory.current.push({
       scope: reviewScope,
-      path: selected,
-      reviewed: selectedReviewed,
+      path,
+      reviewed: wasReviewed,
     });
-    if (!selectedReviewed) moveFile(1);
+    if (advance && !wasReviewed) moveFile(1);
     setReviewed((current) => ({
       ...current,
-      [reviewScope]: selectedReviewed
-        ? (current[reviewScope] || []).filter((path) => path !== selected)
-        : [...(current[reviewScope] || []), selected],
+      [reviewScope]: wasReviewed
+        ? (current[reviewScope] || []).filter((item) => item !== path)
+        : [...(current[reviewScope] || []), path],
     }));
+  }
+
+  function toggleReviewed() {
+    togglePathReviewed(selected, true);
   }
 
   function undo() {
@@ -1695,6 +1762,8 @@ function Review({ info }: { info: Info }) {
                     entries={entries}
                     selected={groupPaths.includes(selected) ? selected : ""}
                     onSelect={select}
+                    reviewed={done}
+                    onToggleReviewed={togglePathReviewed}
                     search={search}
                     collapsed={collapsed}
                     onCollapse={(path, closed) =>
