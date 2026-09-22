@@ -74,9 +74,10 @@ folders also support browsing and commenting, without the Changes view.
   saved comments in the right panel.
 - Press **?** for a searchable keyboard shortcut guide. Common review actions
   are available without a mouse, including `J`/`K` file navigation, `L` to
-  select a line or range for commenting, `/` to search files, and `R` to mark
-  the current file reviewed. `J`/`K` stay within matching files while search is
-  active. `U` undoes the latest review status change.
+  select a line or range for commenting, `F` to fuzzy-find a file across both
+  reviewed and unreviewed files, `/` to filter the sidebar, and `R` to mark the
+  current file reviewed. `J`/`K` stay within matching files while sidebar search
+  is active. `U` undoes the latest review status change.
 - Commented lines have clickable markers that open the comment in the right
   panel. Hover a comment to highlight its lines in the matching view; click it
   to open its file/comparison and scroll to the range.

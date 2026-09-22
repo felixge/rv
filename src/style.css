@@ -138,6 +138,22 @@ code {
   align-items: center;
   gap: 24px;
 }
+.finder-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #5e6977;
+  background: #f8f9fb;
+}
+.finder-trigger > span {
+  color: #7b8795;
+  font-size: 15px;
+}
+.finder-trigger kbd {
+  min-width: 21px;
+  padding: 2px 5px;
+  background: #fff;
+}
 .shortcut-trigger {
   width: 30px;
   height: 30px;
@@ -891,6 +907,105 @@ button.panel-toggle:hover {
   display: grid;
   place-items: center;
   z-index: 10;
+}
+.finder-backdrop {
+  place-items: start center;
+  padding-top: min(16vh, 140px);
+}
+.file-finder {
+  width: min(680px, 90vw);
+  max-height: min(610px, 76vh);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px #132a4660;
+}
+.file-finder h2 {
+  margin: 0;
+  padding: 18px 20px 12px;
+  color: #303b49;
+  font-size: 15px;
+}
+.finder-search {
+  display: flex;
+  align-items: center;
+  margin: 0 20px 12px;
+  padding: 0 10px;
+  border: 1px solid #cfd7e1;
+  border-radius: 7px;
+  color: #8c97a5;
+}
+.finder-search:focus-within {
+  outline: 2px solid #86b7e9;
+  outline-offset: 2px;
+}
+.finder-search input {
+  flex: 1;
+  padding: 11px 9px;
+  border: 0;
+  outline: 0;
+  font-size: 13px;
+}
+.finder-results {
+  min-height: 60px;
+  max-height: 430px;
+  overflow: auto;
+  padding: 0 10px 10px;
+}
+.finder-results button {
+  width: 100%;
+  min-height: 43px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 10px;
+  border: 0;
+  text-align: left;
+}
+.finder-results button.active {
+  background: #eaf2fc;
+  color: #125eaa;
+}
+.finder-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px "IBM Plex Mono", monospace;
+}
+.finder-state {
+  flex-shrink: 0;
+  color: #8a929e;
+  font-size: 10px;
+}
+.finder-state.reviewed {
+  color: #327452;
+}
+.finder-results > p {
+  margin: 0;
+  padding: 28px;
+  text-align: center;
+  color: #8c96a3;
+  font-size: 12px;
+}
+.finder-footer {
+  display: flex;
+  gap: 18px;
+  padding: 10px 20px 12px;
+  border-top: 1px solid #edf0f3;
+  color: #8a929e;
+  font-size: 10px;
+}
+.finder-footer span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.finder-footer kbd {
+  min-width: 22px;
+  padding: 2px 5px;
 }
 .prompt-dialog {
   width: min(650px, 90vw);

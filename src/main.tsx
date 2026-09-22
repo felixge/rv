@@ -64,6 +64,7 @@ type Shortcut = {
 };
 const shortcuts: Shortcut[] = [
   { keys: ["?"], label: "Show keyboard shortcuts", category: "General" },
+  { keys: ["F"], label: "Find a file", category: "Navigate" },
   { keys: ["/"], label: "Search files", category: "Navigate" },
   { keys: ["J"], label: "Next file", category: "Navigate" },
   { keys: ["K"], label: "Previous file", category: "Navigate" },
@@ -125,6 +126,124 @@ function compareTreePaths(left: string, right: string) {
 
 function treeOrdered(paths: string[]) {
   return [...paths].sort(compareTreePaths);
+}
+
+function fuzzyScore(path: string, query: string) {
+  const candidate = path.toLowerCase();
+  const needle = query.trim().toLowerCase();
+  if (!needle) return 0;
+  let score = 0;
+  let previous = -1;
+  for (const character of needle) {
+    const index = candidate.indexOf(character, previous + 1);
+    if (index < 0) return null;
+    score += index - previous - 1;
+    if (previous >= 0 && index === previous + 1) score -= 2;
+    previous = index;
+  }
+  const filename = candidate.slice(candidate.lastIndexOf("/") + 1);
+  if (filename.startsWith(needle)) score -= 8;
+  else if (filename.includes(needle)) score -= 4;
+  return score;
+}
+
+function FileFinder({
+  paths,
+  reviewed,
+  onSelect,
+  onClose,
+}: {
+  paths: string[];
+  reviewed: string[];
+  onSelect: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const matches = useMemo(
+    () => paths
+      .map((path, order) => ({ path, order, score: fuzzyScore(path, query) }))
+      .filter((match): match is { path: string; order: number; score: number } =>
+        match.score !== null,
+      )
+      .sort((left, right) =>
+        left.score - right.score ||
+        compareTreePaths(left.path, right.path) ||
+        left.order - right.order,
+      )
+      .slice(0, 100),
+    [paths, query],
+  );
+  const choose = (path: string) => {
+    onSelect(path);
+    onClose();
+  };
+  return (
+    <div className="modal-backdrop finder-backdrop" onClick={onClose}>
+      <section
+        className="file-finder"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="file-finder-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="file-finder-title">Find a file</h2>
+        <div className="finder-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            autoFocus
+            aria-label="Fuzzy find file"
+            placeholder="Type part of a file path…"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActive(0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                if (matches.length)
+                  setActive((current) =>
+                    (current + (event.key === "ArrowDown" ? 1 : -1) + matches.length) %
+                    matches.length,
+                  );
+              } else if (event.key === "Enter" && matches[active]) {
+                event.preventDefault();
+                choose(matches[active].path);
+              }
+            }}
+          />
+          <kbd>F</kbd>
+        </div>
+        <div className="finder-results" role="listbox" aria-label="Files">
+          {matches.map((match, index) => {
+            const done = reviewed.includes(match.path);
+            return (
+              <button
+                key={match.path}
+                className={index === active ? "active" : ""}
+                role="option"
+                aria-selected={index === active}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => choose(match.path)}
+              >
+                <span className="finder-path">{match.path}</span>
+                <span className={`finder-state${done ? " reviewed" : ""}`}>
+                  {done ? "✓ Reviewed" : "Unreviewed"}
+                </span>
+              </button>
+            );
+          })}
+          {!matches.length && <p>No matching files.</p>}
+        </div>
+        <div className="finder-footer">
+          <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+          <span><kbd>Enter</kbd> Open</span>
+          <span><kbd>Esc</kbd> Close</span>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function ShortcutHelp({ onClose }: { onClose: () => void }) {
@@ -754,6 +873,7 @@ function Review({ info }: { info: Info }) {
   const [copyError, setCopyError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showFinder, setShowFinder] = useState(false);
   const [showLinePicker, setShowLinePicker] = useState(false);
   const [lineTarget, setLineTarget] = useState("");
   const [lineSide, setLineSide] = useState<"additions" | "deletions">("additions");
@@ -1315,9 +1435,10 @@ function Review({ info }: { info: Info }) {
       const modifier = event.metaKey || event.ctrlKey || event.altKey;
 
       if (event.key === "Escape") {
-        if (showShortcuts || showLinePicker || showPrompt) {
+        if (showShortcuts || showFinder || showLinePicker || showPrompt) {
           event.preventDefault();
           setShowShortcuts(false);
+          setShowFinder(false);
           setShowLinePicker(false);
           setShowPrompt(false);
         } else if (editing || range) {
@@ -1328,7 +1449,8 @@ function Review({ info }: { info: Info }) {
         }
         return;
       }
-      if (typing || modifier || showShortcuts || showLinePicker || showPrompt) return;
+      if (typing || modifier || showShortcuts || showFinder || showLinePicker || showPrompt)
+        return;
 
       const key = event.key.toLowerCase();
       if (keySequence.current === "g") {
@@ -1349,10 +1471,11 @@ function Review({ info }: { info: Info }) {
         return;
       }
 
-      const handled = ["?", "/", "j", "k", "l", "r", "u", "y", "p", "v", "b", "c"];
+      const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "b", "c"];
       if (!handled.includes(key)) return;
       event.preventDefault();
       if (key === "?") setShowShortcuts(true);
+      else if (key === "f") setShowFinder(true);
       else if (key === "/") {
         setShowFiles(true);
         requestAnimationFrame(() =>
@@ -1393,6 +1516,15 @@ function Review({ info }: { info: Info }) {
         </span>
         {info.branch && <span className="branch">⑂ {info.branch}</span>}
         <div className="top-actions">
+          <button
+            className="finder-trigger"
+            title="Find a file (F)"
+            onClick={() => setShowFinder(true)}
+          >
+            <span aria-hidden="true">⌕</span>
+            Find file
+            <kbd>F</kbd>
+          </button>
           <button
             className="shortcut-trigger"
             aria-label="Keyboard shortcuts"
@@ -2057,6 +2189,14 @@ function Review({ info }: { info: Info }) {
             </div>
           </section>
         </div>
+      )}
+      {showFinder && (
+        <FileFinder
+          paths={paths}
+          reviewed={reviewedInView || []}
+          onSelect={select}
+          onClose={() => setShowFinder(false)}
+        />
       )}
       {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)} />}
       {showLinePicker && (

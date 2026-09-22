@@ -235,6 +235,29 @@ try {
     ),
     true,
   );
+  await browser("press", "f");
+  await browser("wait", '[aria-label="Fuzzy find file"]');
+  assert.deepEqual(
+    await evaluate("Array.from(document.querySelectorAll('.finder-results button')).map(e => ({ path: e.querySelector('.finder-path').textContent, state: e.querySelector('.finder-state').textContent.trim() }))"),
+    [
+      { path: "src/discount.ts", state: "Unreviewed" },
+      { path: "src/shipping.ts", state: "Unreviewed" },
+      { path: "test/shipping.test.ts", state: "Unreviewed" },
+      { path: ".gitignore", state: "Unreviewed" },
+      { path: "README.md", state: "✓ Reviewed" },
+    ],
+  );
+  await browser("fill", '[aria-label="Fuzzy find file"]', "sht");
+  assert.deepEqual(
+    await evaluate("Array.from(document.querySelectorAll('.finder-path')).map(e => e.textContent)"),
+    ["src/shipping.ts", "test/shipping.test.ts"],
+  );
+  await browser("press", "Enter");
+  await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
+  await browser("find", "role", "button", "click", "--name", "Find file F", "--exact");
+  await browser("wait", '[aria-label="Fuzzy find file"]');
+  await browser("press", "Escape");
+  await wait("!document.querySelector('.file-finder')");
   await tree(".gitignore");
   await wait("document.querySelector('.file-path').textContent === '.gitignore'");
   await browser("press", "j");
