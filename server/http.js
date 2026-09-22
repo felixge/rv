@@ -25,7 +25,10 @@ export function createApp(repo, { allowRemote = false } = {}) {
       const url = new URL(req.url, "http://localhost");
       const host = (req.headers.host || "").split(":")[0];
       if (!allowRemote && !["localhost", "127.0.0.1"].includes(host))
-        return send(403, { error: "Local access only." });
+        return send(403, {
+          error:
+            "Local access only. Behind a reverse proxy? Start rv with --host 0.0.0.0.",
+        });
       if (req.method !== "GET")
         return send(405, { error: "Read-only server." });
       if (url.pathname.startsWith("/api/")) {

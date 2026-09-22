@@ -1,0 +1,4 @@
+services:
+  rv:
+    command: sh -c 'exec node bin/rv.js . --host 0.0.0.0 --no-open --port "$PORT"'
+    port: 4444
