@@ -455,6 +455,17 @@ const inactiveTreeStyle = {
   "--trees-focus-ring-color-override": "transparent",
 } as CSSProperties;
 
+function directoryPaths(paths: string[]) {
+  return [...new Set(
+    paths.flatMap((path) => {
+      const parts = path.split("/");
+      return parts.slice(0, -1).map((_, i) =>
+        parts.slice(0, i + 1).join("/") + "/",
+      );
+    }),
+  )];
+}
+
 function BrowserTree({
   paths,
   entries,
@@ -533,14 +544,7 @@ function BrowserTree({
     })),
   });
   useEffect(() => {
-    const directories = [...new Set(
-      paths.flatMap((path) => {
-        const parts = path.split("/");
-        return parts.slice(0, -1).map((_, i) =>
-          parts.slice(0, i + 1).join("/") + "/",
-        );
-      }),
-    )];
+    const directories = directoryPaths(paths);
     const previous = new Map(
       directories.map((path) => [path, collapsed.includes(path)]),
     );
@@ -565,18 +569,20 @@ function BrowserTree({
         collapseRef.current(path, closed);
       }
     });
-  }, [model]);
+  }, [model, collapsed]);
   useEffect(() => {
     syncingExpansion.current = true;
     model.setSearch(search);
     if (!search) {
-      for (const path of collapsed) {
+      for (const path of directoryPaths(paths)) {
         const item = model.getItem(path);
-        if (item && "collapse" in item) item.collapse();
+        if (!item || !("collapse" in item)) continue;
+        if (collapsed.includes(path)) item.collapse();
+        else item.expand();
       }
     }
     syncingExpansion.current = false;
-  }, [model, search]);
+  }, [model, search, collapsed]);
   useEffect(() => {
     syncingSelection.current = true;
     for (const path of model.getSelectedPaths()) {
@@ -2101,14 +2107,38 @@ function Review({
               ‹
             </button>
           </div>
-          <div className="search">
-            <span aria-hidden="true">⌕</span>
-            <input
-              aria-label="Find a file"
-              placeholder="Find a file…"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
+          <div className="tree-toolbar">
+            <div className="search">
+              <span aria-hidden="true">⌕</span>
+              <input
+                aria-label="Find a file"
+                placeholder="Find a file…"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+            <button
+              className="tree-action"
+              aria-label="Collapse all directories"
+              title="Collapse all directories"
+              onClick={() => setCollapsed(directoryPaths(paths))}
+            >
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
+                <path d="M2 3.5h3l1 1h6v6.5H2z" />
+                <path d="M4.5 7.75h5" />
+              </svg>
+            </button>
+            <button
+              className="tree-action"
+              aria-label="Expand all directories"
+              title="Expand all directories"
+              onClick={() => setCollapsed([])}
+            >
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
+                <path d="M2 3.5h3l1 1h6v6.5H2z" />
+                <path d="M4.5 7.75h5 M7 5.25v5" />
+              </svg>
+            </button>
           </div>
           {[false, true].map((done) => {
             if (done && !reviewedCount) return null;

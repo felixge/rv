@@ -177,6 +177,12 @@ try {
   await wait(
     "document.querySelector('section[aria-label=Unreviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=\"README.md\"]')",
   );
+  const srcDirectory = "document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[role=treeitem][aria-label=src]')";
+  await click("Collapse all directories");
+  await wait(`${srcDirectory}.getAttribute('aria-expanded') === 'false'`);
+  await click("Expand all directories");
+  await wait(`${srcDirectory}.getAttribute('aria-expanded') === 'true'`);
+  console.log("PASS file tree controls collapse and expand all directories");
   await hoverTree("src");
   await wait(
     "document.querySelector('section[aria-label=Unreviewed] file-tree-container').hasAttribute('data-file-review-action') && document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"][data-visible=true]')",

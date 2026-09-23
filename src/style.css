@@ -529,11 +529,18 @@ button.panel-toggle:hover {
 .file-section + .file-section {
   border-top: 1px solid var(--border);
 }
-.search {
+.tree-toolbar {
   display: flex;
   align-items: center;
   flex-shrink: 0;
   margin: 12px 12px 0;
+  gap: 4px;
+}
+.search {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
   background: #fff;
   border: 1px solid #e1e4e9;
   border-radius: 5px;
@@ -553,6 +560,24 @@ button.panel-toggle:hover {
 }
 .search input:focus-visible {
   outline: none;
+}
+.tree-action {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #737d89;
+}
+.tree-action svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .file-tree {
   flex: 1;
