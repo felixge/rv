@@ -10,6 +10,16 @@ import { loadState, saveState } from "../server/state.js";
 import { fixture } from "./fixture.js";
 
 const exec = promisify(execFile);
+const session = (
+  await exec("agent-browser", [
+    "session",
+    "id",
+    "--scope",
+    "worktree",
+    "--prefix",
+    "rv-test",
+  ])
+).stdout.trim();
 const f = await fixture();
 const server = createApp(await repository(f.root));
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -23,7 +33,6 @@ async function waitState(predicate) {
   }
   assert.fail("Expected review state was never saved to the disk cache.");
 }
-const session = `rv-test-${process.pid}`;
 const browser = async (...args) => {
   const { stdout } = await exec(
     "agent-browser",
@@ -62,11 +71,10 @@ async function reviewRange() {
     await browser("find", "role", "option", "click", "--name", "Compare a range");
 }
 async function hoverTree(name, section = "Unreviewed") {
+  const item = `document.querySelector('section[aria-label="${section}"] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=${JSON.stringify(name)}]')`;
+  await wait(item);
   const point = await evaluate(`(() => {
-    const tree = document.querySelector('section[aria-label="${section}"] file-tree-container');
-    const item = Array.from(tree.shadowRoot.querySelectorAll('[role=treeitem]'))
-      .find(item => item.getAttribute('aria-label') === ${JSON.stringify(name)});
-    const rect = item.getBoundingClientRect();
+    const rect = ${item}.getBoundingClientRect();
     return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
   })()`);
   await browser("mouse", "move", String(point.x), String(point.y));
@@ -144,6 +152,9 @@ async function capture(name) {
 }
 
 try {
+  // A killed or timed-out previous run may not have reached finally. Start from
+  // a fresh browser instead of inheriting that session's page and input state.
+  await browser("close").catch(() => {});
   await browser("open", url);
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");

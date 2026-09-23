@@ -19,6 +19,7 @@ export async function fixture() {
   git("init", "-q", "-b", "main");
   git("config", "user.name", "Rv Test");
   git("config", "user.email", "test@example.invalid");
+  git("config", "commit.gpgsign", "false");
   await write(".gitignore", "ignored/\n");
   await write(
     "README.md",
