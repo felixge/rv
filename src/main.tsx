@@ -492,10 +492,12 @@ function BrowserTree({
   const toggleReviewedRef = useRef(onToggleReviewed);
   const toggleDirectoryRef = useRef(onToggleDirectoryReviewed);
   const collapseRef = useRef(onCollapse);
+  const collapsedRef = useRef(collapsed);
   const searchRef = useRef(search);
   toggleReviewedRef.current = onToggleReviewed;
   toggleDirectoryRef.current = onToggleDirectoryReviewed;
   collapseRef.current = onCollapse;
+  collapsedRef.current = collapsed;
   searchRef.current = search;
   const syncingSelection = useRef(false);
   const syncingExpansion = useRef(false);
@@ -544,9 +546,6 @@ function BrowserTree({
   });
   useEffect(() => {
     const directories = directoryPaths(paths);
-    const previous = new Map(
-      directories.map((path) => [path, collapsed.includes(path)]),
-    );
     return model.subscribe(() => {
       if (searchRef.current && !model.getSearchValue()) {
         queueMicrotask(() => {
@@ -563,12 +562,11 @@ function BrowserTree({
         const item = model.getItem(path);
         if (!item || !("isExpanded" in item)) continue;
         const closed = !item.isExpanded();
-        if (closed === previous.get(path)) continue;
-        previous.set(path, closed);
+        if (closed === collapsedRef.current.includes(path)) continue;
         collapseRef.current(path, closed);
       }
     });
-  }, [model, collapsed]);
+  }, [model]);
   useEffect(() => {
     syncingExpansion.current = true;
     model.setSearch(search);
