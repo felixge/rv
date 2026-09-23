@@ -40,6 +40,27 @@ const click = (name) =>
   browser("find", "role", "button", "click", "--name", name, "--exact");
 const tree = (name) =>
   browser("find", "role", "treeitem", "click", "--name", name, "--exact");
+async function reviewScope(name) {
+  if (!await evaluate("Boolean(document.querySelector('.review-popover'))"))
+    await click("Review scope");
+  if (await evaluate("Boolean(document.querySelector('.review-range'))"))
+    await click("← Review scopes");
+  await browser("find", "role", "option", "click", "--name", name);
+}
+async function reviewCommit(query) {
+  if (!await evaluate("Boolean(document.querySelector('.review-popover'))"))
+    await click("Review scope");
+  if (await evaluate("Boolean(document.querySelector('.review-range'))"))
+    await click("← Review scopes");
+  await browser("fill", '[aria-label="Search review scopes"]', query);
+  await browser("press", "Enter");
+}
+async function reviewRange() {
+  if (await evaluate("Boolean(document.querySelector('.review-range'))")) return;
+  await click("Review scope");
+  if (!await evaluate("Boolean(document.querySelector('.review-range'))"))
+    await browser("find", "role", "option", "click", "--name", "Compare a range");
+}
 async function hoverTree(name, section = "Unreviewed") {
   const point = await evaluate(`(() => {
     const tree = document.querySelector('section[aria-label="${section}"] file-tree-container');
@@ -53,7 +74,9 @@ async function hoverTree(name, section = "Unreviewed") {
 const shadow = "document.querySelector('diffs-container')?.shadowRoot";
 const lineStats = (section = "Unreviewed") =>
   evaluate(
-    `document.querySelector('section[aria-label="${section}"] .line-stats')?.getAttribute('aria-label')`,
+    section === "Unreviewed"
+      ? "document.querySelector('.sidebar-header .line-stats')?.getAttribute('aria-label')"
+      : `document.querySelector('section[aria-label="${section}"] .line-stats')?.getAttribute('aria-label')`,
   );
 async function resizePanel(side, delta) {
   const point = await evaluate(
@@ -178,7 +201,12 @@ try {
   await capture("keyboard-shortcuts-search");
   await browser("press", "Escape");
   await wait("!document.querySelector('.shortcut-dialog')");
-  assert.equal(await lineStats(), "6 lines added, 3 lines removed");
+  await browser("press", "g");
+  await browser("press", "r");
+  await wait("document.activeElement.getAttribute('aria-label') === 'Search review scopes'");
+  await browser("press", "Escape");
+  await wait("!document.querySelector('.review-popover')");
+  assert.equal(await lineStats(), "27 total lines of code");
   assert.equal(
     await evaluate(
       "document.querySelector('.topbar [aria-controls=\"file-browser\"]')",
@@ -285,8 +313,8 @@ try {
   await browser("press", "c");
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
   await browser("press", "g");
-  await browser("press", "c");
-  await wait("document.querySelector('.tabs .active').textContent.includes('Changes')");
+  await browser("press", "u");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]').textContent.includes('Uncommitted changes')");
   await browser("press", "v");
   assert.equal(
     await evaluate("document.querySelector('.segmented button:last-child').getAttribute('aria-pressed')"),
@@ -295,7 +323,7 @@ try {
   await browser("press", "v");
   await browser("press", "g");
   await browser("press", "f");
-  await wait("document.querySelector('.tabs .active').textContent.includes('Files')");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]').textContent.includes('File Browser')");
   await tree("README.md");
   await wait("document.querySelector('.file-path').textContent === 'README.md'");
   await browser("press", "j");
@@ -360,7 +388,7 @@ try {
     await evaluate(`${shadow}.querySelector('pre').dataset.overflow`),
     "wrap",
   );
-  assert.match(await evaluate("document.querySelector('.tabs .active').textContent"), /Files/);
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Review scope\"]').textContent"), /File Browser/);
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
   await tree("src");
   await browser("press", "ArrowLeft");
@@ -426,7 +454,7 @@ try {
     "PASS real Copy Prompt clipboard contents, verified by paste-back",
   );
 
-  await click("Changes 3");
+  await reviewScope("Uncommitted changes");
   await wait(`${shadow}?.querySelector('[data-line-type="change-addition"]')`);
   assert.equal(await lineStats(), "6 lines added, 4 lines removed");
   let text = await codeText();
@@ -535,7 +563,7 @@ try {
   await wait(`${shadow}?.querySelector('[data-line-type="change-addition"]')`);
   assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), true);
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
-  assert.match(await evaluate("document.querySelector('.tabs .active').textContent"), /Changes/);
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Review scope\"]').textContent"), /Uncommitted changes/);
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
   await click("Show file browser");
   await click("Open comment on src/shipping.ts:14");
@@ -638,25 +666,24 @@ try {
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('percent / 100')`,
   );
-  await browser("select", '[aria-label="Review source"]', "commit");
-  await click("Commit revision");
+  await click("Review scope");
   assert.deepEqual(
     await evaluate(
-      "Array.from(document.querySelectorAll('.commit-options time')).map(e => e.textContent)",
+      "Array.from(document.querySelectorAll('.review-options time')).map(e => e.textContent)",
     ),
     ["10m ago", "3h ago", "2d ago"],
   );
   assert.deepEqual(
     await evaluate(
-      "Array.from(document.querySelectorAll('.commit-options time')).map(e => ({date:e.dateTime, title:e.title}))",
+      "Array.from(document.querySelectorAll('.review-options time')).map(e => ({date:e.dateTime, title:e.title}))",
     ),
     [...f.dates]
       .reverse()
       .map((date) => ({ date, title: date.replace("T", " ") })),
   );
-  await browser("hover", ".commit-options button:nth-child(2) time");
+  await browser("hover", ".review-options button:nth-of-type(5) time");
   await capture("commit-timestamps");
-  await browser("fill", '[aria-label="Search commits"]', f.second);
+  await browser("fill", '[aria-label="Search review scopes"]', f.second);
   await browser("press", "Enter");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
@@ -669,12 +696,10 @@ try {
   await browser("reload");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('const baseRate = 5')`);
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
-  assert.match(await evaluate("document.querySelector('[aria-label=\"Commit revision\"]').textContent"), /Add international shipping rates/);
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Review scope\"]').textContent"), /Add international shipping rates/);
   await wait(`${shadow}?.querySelector('[data-diff-type="split"]')`);
   console.log("PASS reload restores a non-default commit, its selected file and split layout");
-  await click("Commit revision");
-  await browser("fill", '[aria-label="Search commits"]', f.first);
-  await browser("press", "Enter");
+  await reviewCommit(f.first);
   await wait(
     "document.querySelector('.code-footer').textContent.includes('Commit " +
       f.first.slice(0, 7) +
@@ -690,7 +715,7 @@ try {
   assert.match(await codeText(), /const baseRate = 5/);
   console.log("PASS deleted/untracked files, recent commit and root commit");
 
-  await browser("select", '[aria-label="Review source"]', "range");
+  await reviewRange();
   await click("Base revision");
   assert.equal(
     await evaluate(
@@ -776,6 +801,7 @@ try {
     await evaluate("Boolean(document.querySelector('.commit-popover'))"),
     false,
   );
+  await reviewRange();
   await click("Target revision");
   await browser("click", ".brand");
   assert.equal(
@@ -787,6 +813,7 @@ try {
     `Commit ${f.first.slice(0, 7)}`,
   );
   await browser("set", "viewport", "1000", "800", "2");
+  await reviewRange();
   await click("Target revision");
   assert.equal(
     await evaluate(
@@ -800,7 +827,8 @@ try {
   await browser("reload");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('const baseRate = 5')`);
   assert.equal(await evaluate("document.querySelector('.code-footer').textContent.trim()"), `Commit ${f.first.slice(0, 7)}`);
-  assert.equal(await evaluate("document.querySelector('[aria-label=\"Review source\"]').value"), "range");
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Review scope\"]').textContent"), /Add shipping calculator/);
+  await reviewRange();
   assert.match(await evaluate("document.querySelector('[aria-label=\"Target revision\"]').textContent"), /Introduce free shipping threshold/);
   console.log("PASS unsubmitted range pickers survive reload without changing the applied commit");
   await click("Compare");
@@ -822,6 +850,7 @@ try {
   await browser("press", "Backspace");
   await capture("commit-range");
   // Custom refs remain supported, without relying on native datalist behavior.
+  await reviewRange();
   await click("Base revision");
   await browser("fill", '[aria-label="Search base commits"]', "HEAD~2");
   await capture("commit-picker-ref");
@@ -871,7 +900,7 @@ try {
   assert.ok((await highlightedLines()).includes(2));
   assert.ok((await highlightedLines()).includes(3));
   assert.ok(!(await highlightedLines()).includes(4));
-  await browser("select", '[aria-label="Review source"]', "working");
+  await reviewScope("Uncommitted changes");
   await browser("click", ".comment:nth-child(4) p");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`,
@@ -879,7 +908,7 @@ try {
   assert.doesNotMatch(await codeText(), /THRESHOLD = 75/);
   assert.equal(
     await evaluate(
-      "document.querySelector('[aria-label=\"Review source\"]').value",
+      "document.querySelector('[aria-label=\"Review scope\"]').textContent.includes('→') ? 'range' : ''",
     ),
     "range",
   );
@@ -891,6 +920,7 @@ try {
   console.log(
     "PASS asymmetric old line 7 / new line 13 anchors and real drag-select range 1–3",
   );
+  await reviewRange();
   await click("Base revision");
   await browser(
     "fill",
@@ -910,10 +940,11 @@ try {
   await browser("reload");
   await wait("document.querySelectorAll('.comment').length === 3");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`);
+  await reviewRange();
   assert.match(await evaluate("document.querySelector('[aria-label=\"Base revision\"]').textContent"), /nonexistent-ref/);
   // Refresh restores the successful comparison, not the failed draft ref.
-  await browser("select", '[aria-label="Review source"]', "working");
-  await browser("click", ".tabs button:first-child");
+  await reviewScope("Uncommitted changes");
+  await reviewScope("File Browser");
   // Edit an existing comment while a different file is selected: preserve its anchor.
   await tree("README.md");
   await browser("click", ".comment:first-child .comment-bottom button");
@@ -946,7 +977,7 @@ try {
   f.git("commit", "-qm", "Clean checkpoint");
   await browser("reload");
   await wait(
-    "document.querySelector('.tabs')?.textContent.includes('Changes 0')",
+    "document.querySelector('.sidebar-header')?.textContent.includes('Repository files')",
   );
   await tree("long.ts");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
@@ -974,7 +1005,7 @@ try {
   console.log(
     "PASS comment click scrolls to lines 160–162, including navigation from another file",
   );
-  await click("Changes 0");
+  await reviewScope("Uncommitted changes");
   await wait(
     "document.querySelector('main').textContent.includes('No changes to review')",
   );
@@ -1001,26 +1032,22 @@ try {
     await evaluate("document.querySelector('main').textContent"),
     /No changes to review/,
   );
-  await click("↻ Refresh");
-  await wait(
-    "document.querySelector('.tabs')?.textContent.includes('Changes 1')",
-  );
-  await click("Changes 1");
+  await browser("press", "g");
+  await browser("press", "c");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
+  await browser("press", "g");
+  await browser("press", "u");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('pending = true')`,
   );
-  await browser("select", '[aria-label="Review source"]', "commit");
-  await click("Commit revision");
-  await browser("fill", '[aria-label="Search commits"]', "Commit created after page load");
-  await browser("press", "Enter");
-  await wait("document.querySelector('[aria-label=\"Commit revision\"]')?.textContent.includes('Commit created after page load')");
+  await browser("press", "g");
+  await browser("press", "c");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
   assert.equal((await comments()).length, 2);
   console.log(
-    "PASS clean state stays unchanged after a new commit + edit + focus; zero background API calls; refresh reveals both",
+    "PASS clean state stays unchanged after a new commit + edit + focus; zero background API calls; G C refreshes the newest commit and G U reveals uncommitted changes",
   );
-  await click("Commit revision");
-  await browser("fill", '[aria-label="Search commits"]', f.second);
-  await browser("press", "Enter");
+  await reviewCommit(f.second);
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
   );
@@ -1101,7 +1128,7 @@ try {
   await capture("reset-cancelled");
   await click("Reset");
   await browser("dialog", "accept");
-  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
   assert.deepEqual(await comments(), []);
   assert.equal(
     await evaluate("document.querySelector('.copy').disabled"),
@@ -1136,18 +1163,14 @@ try {
     "No files changed.",
   );
   await browser("reload");
-  await wait("document.querySelector('.tabs')");
-  await click("Changes 1");
-  await browser("select", '[aria-label="Review source"]', "commit");
-  await click("Commit revision");
-  await browser("fill", '[aria-label="Search commits"]', "Document the decision");
-  await browser("press", "Enter");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')");
+  await reviewCommit("Document the decision");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
   );
   assert.match(
-    await evaluate("document.querySelector('.tabs').textContent"),
-    /Changes 0/,
+    await evaluate("document.querySelector('.sidebar-header').textContent"),
+    /Changed files\s*1/,
   );
   await line(3);
   await browser("fill", "#comment-text", "Explain the decision.");
@@ -1188,9 +1211,7 @@ try {
     ),
     "true",
   );
-  await click("Commit revision");
-  await browser("fill", '[aria-label="Search commits"]', f.second);
-  await browser("press", "Enter");
+  await reviewCommit(f.second);
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
   );
@@ -1204,7 +1225,7 @@ try {
   await click("Mark reviewed");
   assert.match(await reviewedText(), /Commit message/);
   assert.match(await reviewedText(), /shipping.ts/);
-  assert.equal(await lineStats(), "5 lines added, 0 lines removed");
+  assert.equal(await lineStats(), "6 lines added, 1 lines removed");
   assert.equal(await lineStats("Reviewed"), "1 lines added, 1 lines removed");
   assert.doesNotMatch(
     await sectionText("Unreviewed"),
@@ -1284,9 +1305,9 @@ try {
   assert.equal(await lineStats(), "6 lines added, 1 lines removed");
   assert.equal(await lineStats("Reviewed"), "0 lines added, 0 lines removed");
   console.log(
-    "PASS exact section line totals for Files, Working tree and commits; totals move on review/unreview, message adds no lines",
+    "PASS exact scope and reviewed line totals for File Browser, uncommitted changes and commits; message adds no lines",
   );
-  await browser("select", '[aria-label="Review source"]', "range");
+  await reviewRange();
   await click("Base revision");
   await browser("fill", '[aria-label="Search base commits"]', f.first);
   await browser("press", "Enter");
@@ -1300,21 +1321,20 @@ try {
   assert.equal(await reviewedText(), "");
   await click("Mark reviewed");
   assert.match(await reviewedText(), /shipping\.ts/);
-  await browser("select", '[aria-label="Review source"]', "commit");
+  await reviewCommit(f.second);
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
   );
   assert.match(await reviewedText(), /Commit message/);
   assert.doesNotMatch(await reviewedText(), /shipping\.ts/);
-  await click("Files 8");
+  await reviewScope("File Browser");
   await tree("shipping.ts");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`,
   );
   await click("Mark reviewed");
   assert.match(await reviewedText(), /shipping\.ts/);
-  await click("Changes 2");
-  await browser("select", '[aria-label="Review source"]', "working");
+  await reviewScope("Uncommitted changes");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('pending = true')`,
   );
@@ -1322,14 +1342,11 @@ try {
   await click("Mark reviewed");
   assert.match(await reviewedText(), /pending-after-load\.ts/);
   await browser("reload");
-  await wait("document.querySelector('.tabs')");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')");
   assert.equal(await reviewedText(), "");
-  await click("Changes 1");
+  await reviewScope("Uncommitted changes");
   assert.equal(await reviewedText(), "");
-  await browser("select", '[aria-label="Review source"]', "commit");
-  await click("Commit revision");
-  await browser("fill", '[aria-label="Search commits"]', "Document the decision");
-  await browser("press", "Enter");
+  await reviewCommit("Document the decision");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
   );
@@ -1345,13 +1362,13 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 500));
   await saveState(f.root, { ...withComment, view: "{broken" });
   await browser("open", url);
-  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
   assert.equal((await comments()).length, 1);
   await browser("open", "about:blank");
   await new Promise((resolve) => setTimeout(resolve, 500));
   await saveState(f.root, { ...withComment, view: { tab: "obsolete", split: "wrong-type", collapsed: null, selected: "deleted-file.ts", futureField: "unused" } });
   await browser("open", url);
-  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
   // The app re-saves its validated view, dropping unknown fields and values.
   await waitState((state) => state.view && !("futureField" in state.view) && state.view.tab === "files");
@@ -1362,7 +1379,7 @@ try {
   await wait("document.querySelector('[role=alert]')?.textContent.includes('Unknown commit')");
   await click("Reset");
   await browser("dialog", "accept");
-  await wait("document.querySelector('.toolbar-label')?.textContent === 'Repository files'");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
   assert.deepEqual(await comments(), []);
   console.log("PASS corrupt/obsolete view state falls back safely; missing commits remain recoverable with Reset");
   const errors = await browser("errors");

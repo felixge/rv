@@ -75,8 +75,10 @@ const shortcuts: Shortcut[] = [
   { keys: ["/"], label: "Search files", category: "Navigate" },
   { keys: ["J"], label: "Next file", category: "Navigate" },
   { keys: ["K"], label: "Previous file", category: "Navigate" },
-  { keys: ["G", "F"], label: "Go to Files", category: "Navigate" },
-  { keys: ["G", "C"], label: "Go to Changes", category: "Navigate" },
+  { keys: ["G", "F"], label: "Open File Browser", category: "Navigate" },
+  { keys: ["G", "C"], label: "Review most recent commit", category: "Navigate" },
+  { keys: ["G", "U"], label: "Review uncommitted changes", category: "Navigate" },
+  { keys: ["G", "R"], label: "Open review palette", category: "Navigate" },
   { keys: ["L"], label: "Comment on a line or range", category: "Review" },
   { keys: ["R"], label: "Toggle reviewed", category: "Review" },
   { keys: ["U"], label: "Undo last action", category: "Review" },
@@ -721,6 +723,7 @@ function CommitPicker({
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
+          event.stopPropagation();
           setOpen(false);
           trigger.current?.focus();
         }
@@ -834,6 +837,248 @@ function CommitPicker({
   );
 }
 
+function ReviewPalette({
+  tab,
+  comparison,
+  mode,
+  from,
+  to,
+  commits,
+  isGit,
+  comparing,
+  onFiles,
+  onWorking,
+  onCommit,
+  onRangeDraft,
+  onRange,
+  openRequest,
+}: {
+  tab: string;
+  comparison: Comparison;
+  mode: string;
+  from: string;
+  to: string;
+  commits: Info["commits"];
+  isGit: boolean;
+  comparing: boolean;
+  onFiles: () => void;
+  onWorking: () => void;
+  onCommit: (value: string) => void;
+  onRangeDraft: (from: string, to: string) => void;
+  onRange: () => void;
+  openRequest: number;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selectedCommit = commits.find((commit) => commit.id === comparison.target);
+  const current = tab === "files"
+    ? "File Browser"
+    : !comparison.target
+      ? "Uncommitted changes"
+      : comparison.message !== undefined
+        ? selectedCommit?.subject || `Commit ${comparison.target.slice(0, 7)}`
+        : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
+  const search = query.trim().toLowerCase();
+  const choices = commits.filter((commit) =>
+    `${commit.id} ${commit.subject}`.toLowerCase().includes(search),
+  );
+  const scopeMatches = (value: string) =>
+    !search || value.toLowerCase().includes(search);
+  const customRef = query.trim() &&
+    !commits.some((commit) =>
+      commit.id === query.trim() || commit.short === query.trim()
+    ) &&
+    !["file browser", "uncommitted changes", "compare a range"].some((label) =>
+      label.includes(search),
+    );
+
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+  useEffect(() => {
+    if (!openRequest) return;
+    setOpen(true);
+    setRangeOpen(false);
+    setQuery("");
+  }, [openRequest]);
+
+  function choose(action: () => void) {
+    action();
+    setOpen(false);
+    setRangeOpen(false);
+    setQuery("");
+    trigger.current?.focus();
+  }
+
+  return (
+    <div
+      className="review-picker"
+      ref={root}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setOpen(false);
+          setRangeOpen(false);
+          trigger.current?.focus();
+        }
+      }}
+    >
+      <button
+        type="button"
+        ref={trigger}
+        className="review-trigger"
+        aria-label="Review scope"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => {
+          setOpen(!open);
+          setRangeOpen(mode === "range" && tab === "changes");
+          setQuery("");
+        }}
+      >
+        <span>Review:</span>
+        <strong>{current}</strong>
+        <span aria-hidden="true">⌄</span>
+      </button>
+      {open && (
+        <div className="review-popover" role="dialog" aria-label="Choose review scope">
+          {rangeOpen ? (
+            <form
+              className="review-range"
+              onSubmit={(event) => {
+                event.preventDefault();
+                choose(onRange);
+              }}
+            >
+              <button
+                type="button"
+                className="review-back"
+                onClick={() => setRangeOpen(false)}
+              >
+                ← Review scopes
+              </button>
+              <h2>Compare a range</h2>
+              <p>Choose base and target revisions.</p>
+              <CommitPicker
+                label="Base"
+                commits={commits}
+                value={from}
+                onChange={(value) => onRangeDraft(value, to)}
+              />
+              <span className="range-arrow" aria-hidden="true">↓</span>
+              <CommitPicker
+                label="Target"
+                commits={commits}
+                value={to}
+                onChange={(value) => onRangeDraft(from, value)}
+              />
+              <button className="primary" disabled={comparing}>Compare</button>
+            </form>
+          ) : (
+            <>
+              <div className="review-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                  autoFocus
+                  aria-label="Search review scopes"
+                  placeholder="File, commit, branch, tag, or range…"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    if (scopeMatches("File Browser Browse the repository at HEAD"))
+                      choose(onFiles);
+                    else if (isGit && scopeMatches("Uncommitted changes Review uncommitted changes"))
+                      choose(onWorking);
+                    else if (commits.length && scopeMatches("Compare a range Choose base and target revisions"))
+                      setRangeOpen(true);
+                    else if (choices[0]) choose(() => onCommit(choices[0].id));
+                    else if (customRef) choose(() => onCommit(query.trim()));
+                  }}
+                />
+              </div>
+              <div className="review-options" role="listbox" aria-label="Review scopes">
+                {scopeMatches("File Browser Browse the repository at HEAD") && (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={tab === "files"}
+                    onClick={() => choose(onFiles)}
+                  >
+                    <span className="option-check">{tab === "files" ? "✓" : ""}</span>
+                    <span><strong>File Browser</strong><small>Browse the repository at HEAD</small></span>
+                  </button>
+                )}
+                {isGit && scopeMatches("Uncommitted changes Review uncommitted changes") && (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={tab === "changes" && !comparison.target}
+                    onClick={() => choose(onWorking)}
+                  >
+                    <span className="option-check">{tab === "changes" && !comparison.target ? "✓" : ""}</span>
+                    <span><strong>Uncommitted changes</strong><small>Review uncommitted changes</small></span>
+                  </button>
+                )}
+                {!!commits.length && scopeMatches("Compare a range Choose base and target revisions") && (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={tab === "changes" && !!comparison.target && comparison.message === undefined}
+                    onClick={() => setRangeOpen(true)}
+                  >
+                    <span className="option-check">{tab === "changes" && !!comparison.target && comparison.message === undefined ? "✓" : ""}</span>
+                    <span><strong>Compare a range…</strong><small>Choose base and target revisions</small></span>
+                  </button>
+                )}
+                {(!!choices.length || customRef) && <h2>Recent commits</h2>}
+                {choices.map((commit) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={tab === "changes" && comparison.message !== undefined && comparison.target === commit.id}
+                    key={commit.id}
+                    onClick={() => choose(() => onCommit(commit.id))}
+                  >
+                    <span className="option-check">{tab === "changes" && comparison.target === commit.id ? "✓" : ""}</span>
+                    <span className="commit-subject">{commit.subject}</span>
+                    <code>{commit.short}</code>
+                    <time dateTime={commit.date} title={commit.date.replace("T", " ")}>{commitAge(commit.date)}</time>
+                  </button>
+                ))}
+                {customRef && (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    onClick={() => choose(() => onCommit(query.trim()))}
+                  >
+                    <span className="option-check" />
+                    <span><strong>Review commit {query.trim()}</strong><small>Use this Git ref</small></span>
+                  </button>
+                )}
+                {!scopeMatches("File Browser Browse the repository at HEAD") &&
+                  !scopeMatches("Uncommitted changes Review uncommitted changes") &&
+                  !scopeMatches("Compare a range Choose base and target revisions") &&
+                  !choices.length && !customRef && <p>No matching review scope.</p>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PanelResizeHandle({
   side,
   onResize,
@@ -930,10 +1175,28 @@ function App() {
         {error && <button onClick={() => location.reload()}>Try again</button>}
       </div>
     );
-  return <Review info={loaded.info} state={loaded.state} />;
+  return (
+    <Review
+      info={loaded.info}
+      state={loaded.state}
+      refreshInfo={async () => {
+        const info = await api<Info>("info", { refresh: String(Date.now()) });
+        setLoaded((current) => current ? { ...current, info } : current);
+        return info;
+      }}
+    />
+  );
 }
 
-function Review({ info, state }: { info: Info; state: SavedState }) {
+function Review({
+  info,
+  state,
+  refreshInfo,
+}: {
+  info: Info;
+  state: SavedState;
+  refreshInfo: () => Promise<Info>;
+}) {
   const [saved] = useState(() => readView(info, state.view));
   const [restoring, setRestoring] = useState(saved.appliedMode !== "working");
   const [reviewed, setReviewed] = useState<Record<string, string[]>>(() =>
@@ -950,7 +1213,7 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
   const [to, setTo] = useState(saved.to);
   const [comparison, setComparison] = useState<Comparison>(info.working);
   const compareLabel = !comparison.target
-    ? "Working tree"
+    ? "Uncommitted changes"
     : comparison.message !== undefined
       ? `Commit ${comparison.target.slice(0, 7)}`
       : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
@@ -974,6 +1237,7 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
   const [copyError, setCopyError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [reviewPickerRequest, setReviewPickerRequest] = useState(0);
   const [showFinder, setShowFinder] = useState(false);
   const [showLinePicker, setShowLinePicker] = useState(false);
   const [lineTarget, setLineTarget] = useState("");
@@ -1325,6 +1589,18 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
       : [];
   const highlightedRange =
     highlight && matchesView(highlight) ? commentRange(highlight) : range;
+  const sidebarAdditions = entries.reduce(
+    (sum, entry) => sum + (entry.additions || 0),
+    0,
+  );
+  const sidebarDeletions = entries.reduce(
+    (sum, entry) => sum + (entry.deletions || 0),
+    0,
+  );
+  const sidebarLines = paths.reduce(
+    (sum, path) => sum + (info.lineCounts[path] || 0),
+    0,
+  );
 
   useEffect(() => {
     if (!pendingComment || loading || comparing || !content || !viewer.current)
@@ -1356,7 +1632,7 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
     } else {
       try {
         const nextMode =
-          comment.context === "Working tree"
+          comment.context === "Working tree" || comment.context === "Uncommitted changes"
             ? "working"
             : comment.context.startsWith("Commit ")
               ? "commit"
@@ -1635,9 +1911,24 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
       if (keySequence.current === "g") {
         keySequence.current = "";
         window.clearTimeout(keySequenceTimer.current);
-        if (key === "f" || key === "c") {
+        if (["f", "c", "u", "r"].includes(key)) {
           event.preventDefault();
-          changeTab(key === "f" ? "files" : "changes");
+          if (key === "r") setReviewPickerRequest((value) => value + 1);
+          else if (key === "f") changeTab("files");
+          else if (key === "u") {
+            changeTab("changes");
+            void compare("working");
+          } else {
+            void refreshInfo()
+              .then((nextInfo) => {
+                const latest = nextInfo.commits[0]?.id;
+                if (!latest) return;
+                setTo(latest);
+                changeTab("changes");
+                void compare("commit", latest);
+              })
+              .catch((error) => setError((error as Error).message));
+          }
         }
         return;
       }
@@ -1695,6 +1986,43 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
           {info.name}
         </span>
         {info.branch && <span className="branch">⑂ {info.branch}</span>}
+        <ReviewPalette
+          tab={tab}
+          comparison={comparison}
+          mode={mode}
+          from={from}
+          to={to}
+          commits={info.commits}
+          isGit={info.isGit}
+          comparing={comparing}
+          onFiles={() => changeTab("files")}
+          onWorking={() => {
+            changeTab("changes");
+            void compare("working");
+          }}
+          onCommit={(value) => {
+            setTo(value);
+            changeTab("changes");
+            void compare("commit", value);
+          }}
+          onRangeDraft={(nextFrom, nextTo) => {
+            setMode("range");
+            setFrom(nextFrom);
+            setTo(nextTo);
+          }}
+          onRange={() => {
+            changeTab("changes");
+            void compare("range");
+          }}
+          openRequest={reviewPickerRequest}
+        />
+        <button
+          className="refresh"
+          onClick={() => location.reload()}
+          title="Reload files and commits; keep your view and saved comments"
+        >
+          ↻ <span>Refresh</span>
+        </button>
         <div className="top-actions">
           <button
             className="finder-trigger"
@@ -1753,19 +2081,25 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
           hidden={!showFiles}
         >
           <PanelResizeHandle side="files" onResize={setFilesWidth} />
-          <nav className="tabs">
-            <button
-              className={tab === "files" ? "active" : ""}
-              onClick={() => changeTab("files")}
-            >
-              Files <span>{info.files.length}</span>
-            </button>
-            <button
-              className={tab === "changes" ? "active" : ""}
-              onClick={() => changeTab("changes")}
-            >
-              Changes <span>{comparison.entries.length}</span>
-            </button>
+          <div className="sidebar-header">
+            <strong>{tab === "files" ? "Repository files" : "Changed files"}</strong>
+            <span className="file-count">
+              {paths.length + (hasMessage ? 1 : 0)}
+            </span>
+            <span className="line-stats" aria-label={
+              tab === "files"
+                ? `${sidebarLines.toLocaleString("en-US")} total lines of code`
+                : `${sidebarAdditions} lines added, ${sidebarDeletions} lines removed`
+            }>
+              {tab === "files" ? (
+                <span className="lines-total">{sidebarLines.toLocaleString("en-US")} lines</span>
+              ) : (
+                <>
+                  <span className="lines-added">+{sidebarAdditions}</span>
+                  <span className="lines-removed">−{sidebarDeletions}</span>
+                </>
+              )}
+            </span>
             <button
               className="panel-toggle"
               aria-label="Hide file browser"
@@ -1775,7 +2109,7 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
             >
               ‹
             </button>
-          </nav>
+          </div>
           <div className="search">
             <span aria-hidden="true">⌕</span>
             <input
@@ -1818,18 +2152,11 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
                 className={`file-section${groupPaths.length ? "" : " no-files"}`}
                 aria-label={done ? "Reviewed" : "Unreviewed"}
               >
-                <div className="sidebar-caption">
+                {done && <div className="sidebar-caption">
                   <span className="section-label">
-                    {done
-                      ? "Reviewed"
-                      : tab === "files"
-                        ? "Explorer"
-                        : "Changed files"}
+                    Reviewed
                     <span className="file-count">
-                      {done
-                        ? reviewedCount
-                        : groupPaths.length +
-                          (hasMessage && !messageReviewed ? 1 : 0)}
+                      {reviewedCount}
                     </span>
                   </span>
                   <span
@@ -1856,7 +2183,7 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
                       </>
                     )}
                   </span>
-                </div>
+                </div>}
                 {hasMessage &&
                   messageReviewed === done &&
                   "commit message".includes(search.toLowerCase()) && (
@@ -1917,74 +2244,6 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
           })}
         </aside>
         <main className="main">
-          <div className="review-toolbar">
-            {tab === "changes" ? (
-              <>
-                <select
-                  aria-label="Review source"
-                  value={mode}
-                  disabled={!info.isGit}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (value === "range") setMode(value);
-                    else void compare(value);
-                  }}
-                >
-                  <option value="working">Working tree</option>
-                  <option value="commit" disabled={!info.commits.length}>
-                    Recent commit
-                  </option>
-                  <option value="range" disabled={!info.commits.length}>
-                    Commit range
-                  </option>
-                </select>
-                {mode === "commit" && (
-                  <CommitPicker
-                    label="Commit"
-                    commits={info.commits}
-                    value={to}
-                    onChange={(value) => {
-                      setTo(value);
-                      void compare("commit", value);
-                    }}
-                  />
-                )}
-                {mode === "range" && (
-                  <form
-                    className="range-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void compare("range");
-                    }}
-                  >
-                    <CommitPicker
-                      label="Base"
-                      commits={info.commits}
-                      value={from}
-                      onChange={setFrom}
-                    />
-                    <span aria-hidden="true">→</span>
-                    <CommitPicker
-                      label="Target"
-                      commits={info.commits}
-                      value={to}
-                      onChange={setTo}
-                    />
-                    <button disabled={comparing}>Compare</button>
-                  </form>
-                )}
-              </>
-            ) : (
-              <span className="toolbar-label">Repository files</span>
-            )}
-            <button
-              className="refresh"
-              onClick={() => location.reload()}
-              title="Reload files and commits; keep your view and saved comments"
-            >
-              ↻ <span>Refresh</span>
-            </button>
-          </div>
           <div className="file-heading">
             <span className="file-path">
               {messageView
@@ -2056,8 +2315,8 @@ function Review({ info, state }: { info: Info; state: SavedState }) {
                 <span className="empty-symbol">✓</span>
                 <h2>No changes to review</h2>
                 <p>
-                  {compareLabel === "Working tree"
-                    ? "Your working tree is clean."
+                  {compareLabel === "Uncommitted changes"
+                    ? "You have no uncommitted changes."
                     : "These revisions have no file differences."}
                   <br />
                   New changes appear when you refresh.

@@ -63,9 +63,11 @@ try {
   })()`);
   for (const mode of ["Files", "Unified", "Split"]) {
     if (mode === "Files") {
-      await browser("click", ".tabs button:first-child");
+      await browser("click", '[aria-label="Review scope"]');
+      await browser("find", "role", "option", "click", "--name", "File Browser");
     } else if (mode === "Unified") {
-      await browser("click", ".tabs button:nth-child(2)");
+      await browser("click", '[aria-label="Review scope"]');
+      await browser("find", "role", "option", "click", "--name", "Uncommitted changes");
     } else {
       await browser("find", "role", "button", "click", "--name", "Split", "--exact");
     }
