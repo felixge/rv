@@ -26,6 +26,7 @@ try {
   await git("init", "-q");
   await git("config", "user.name", "Navigation Test");
   await git("config", "user.email", "test@example.invalid");
+  await git("config", "commit.gpgsign", "false");
   const source = (name, changed) => Array.from({ length: 2000 }, (_, i) =>
     `export const ${name}_${i} = { label: "${name}", value: ${i + (changed && i % 7 === 0 ? 1 : 0)} };\n`,
   ).join("");
