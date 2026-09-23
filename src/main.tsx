@@ -1738,28 +1738,19 @@ function Review({
       );
   }
 
-  function reset() {
+  function clearReview() {
     if (!window.confirm(
-      "Reset this repository’s review? All comments, review progress and view settings will be deleted. This cannot be undone.",
+      "Clear all comments and review progress? View settings will be kept. This cannot be undone.",
     )) return;
-    // The reload below fires the pagehide flush; drop the pending state so it
-    // cannot re-save what the delete removes.
-    stateDirty.current = false;
-    sendState("DELETE")
-      .catch(() => {})
-      .finally(() => {
-        // Drop keys from pre-cache builds so a stale browser copy never
-        // re-seeds the state we just deleted.
-        try {
-          for (const key of [
-            `rv:comments:${info.root}`,
-            `rv:reviewed:${info.root}`,
-            `rv:view:${info.root}`,
-          ])
-            localStorage.removeItem(key);
-        } catch {}
-        location.reload();
-      });
+    setComments([]);
+    setReviewed({});
+    reviewHistory.current = [];
+    setEditing(undefined);
+    setDraft("");
+    setRange(null);
+    setHighlight(null);
+    setPendingComment(null);
+    setCopied(false);
   }
 
   function togglePathReviewed(path: string, advance = false) {
@@ -2041,8 +2032,8 @@ function Review({
           >
             ?
           </button>
-          <button className="reset" onClick={reset}>
-            Reset
+          <button className="clear" onClick={clearReview}>
+            Clear
           </button>
           <button
             className="primary copy"

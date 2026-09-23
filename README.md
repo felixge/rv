@@ -44,8 +44,8 @@ Your review state (comments, reviewed marks, view settings) is cached on local
 disk, outside the repository, in one readable directory per opened path —
 `~/.cache/rv/--home-you-repo--/state.json` on Linux,
 `~/Library/Caches/rv/--Users-you-repo--/state.json` on macOS. It survives
-server restarts, page reloads and browser changes. Reset the review from the
-UI to delete it.
+server restarts, page reloads and browser changes. Use Clear to remove comments
+and reviewed marks while keeping your view settings.
 
 Open directly on uncommitted changes, a single commit, or a commit range:
 

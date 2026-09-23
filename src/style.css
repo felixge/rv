@@ -332,14 +332,14 @@ code {
   gap: 16px;
   padding: 8px 11px 8px 15px;
 }
-.reset {
+.clear {
   align-self: stretch;
   min-width: 88px;
   padding: 8px 18px;
   color: #a93434;
   border-color: #e2bebe;
 }
-.reset:hover {
+.clear:hover {
   background: #fff2f2;
 }
 .count {

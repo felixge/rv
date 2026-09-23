@@ -1117,18 +1117,20 @@ try {
   await click("Mark reviewed");
   await resizePanel("files", 60);
   await click("Hide comments");
+  const beforeClearFilesWidth = await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width");
+  const beforeClearCommentsWidth = await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width");
   await evaluate("localStorage.setItem('rv:comments:/another-repo', 'keep me')");
-  const beforeReset = await evaluate("JSON.stringify({...localStorage})");
-  await click("Reset");
-  assert.match(JSON.stringify(await browser("dialog", "status")), /All comments, review progress and view settings/);
+  const beforeClear = await evaluate("JSON.stringify({...localStorage})");
+  await click("Clear");
+  assert.match(JSON.stringify(await browser("dialog", "status")), /Clear all comments and review progress/);
   await browser("dialog", "dismiss");
-  assert.equal(await evaluate("JSON.stringify({...localStorage})"), beforeReset);
+  assert.equal(await evaluate("JSON.stringify({...localStorage})"), beforeClear);
   assert.equal((await comments()).length, 3);
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
-  await capture("reset-cancelled");
-  await click("Reset");
+  await capture("clear-cancelled");
+  await click("Clear");
   await browser("dialog", "accept");
-  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
+  await wait("document.querySelectorAll('.comment').length === 0");
   assert.deepEqual(await comments(), []);
   assert.equal(
     await evaluate("document.querySelector('.copy').disabled"),
@@ -1138,20 +1140,25 @@ try {
     await evaluate("document.querySelectorAll('.comment-marker').length"),
     0,
   );
-  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
-  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
-  assert.equal(await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width"), 232);
-  assert.equal(await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width"), 310);
-  // Reset clears the disk cache for this repository only.
-  await waitState((state) => !state.comments.length && state.view.selected === "");
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
+  assert.equal(await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width"), beforeClearFilesWidth);
+  assert.equal(await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width"), beforeClearCommentsWidth);
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Mark reviewed')"), true);
+  // Clear updates comments and review progress while preserving the view.
+  await waitState((state) => !state.comments.length && !Object.keys(state.reviewed).length && state.view.selected === "src/shipping.ts" && state.view.showComments === false);
   assert.equal(await evaluate("localStorage.getItem('rv:comments:/another-repo')"), "keep me");
   assert.doesNotMatch(await evaluate("document.body.textContent"), /Clear Comments|Undo/);
-  await capture("review-reset");
+  await capture("comments-cleared");
   await browser("reload");
-  await wait("document.querySelector('.comments-panel')");
+  await wait("document.querySelector('.file-path')?.textContent === 'src/shipping.ts'");
   assert.deepEqual(await comments(), []);
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
+  assert.equal(await evaluate("document.querySelector('#file-browser').getBoundingClientRect().width"), beforeClearFilesWidth);
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Mark reviewed')"), true);
   console.log(
-    "PASS Reset confirmation cancels without changes; confirmed reset clears comments, progress and view state only for this repository, persists across reload",
+    "PASS Clear confirmation cancels without changes; confirmed clear removes comments and review progress while preserving view state across reload",
   );
 
   f.git(
@@ -1354,7 +1361,7 @@ try {
   console.log(
     "PASS Reviewed moves files and messages without duplicates; search, selection, undo, per-comparison isolation, historical persistence and mutable-view refresh reset",
   );
-  // Old/corrupt UI state must not prevent opening or resetting a repository.
+  // Old/corrupt UI state must not prevent opening or clearing comments.
   // State now lives in the disk cache; corrupt it there while no page is open,
   // so the app's unload flush cannot overwrite the tampered file.
   const withComment = await loadState(f.root);
@@ -1377,11 +1384,17 @@ try {
   await saveState(f.root, { ...withComment, view: { tab: "changes", mode: "commit", appliedMode: "commit", target: "missing-commit", selected: "src/shipping.ts" } });
   await browser("open", url);
   await wait("document.querySelector('[role=alert]')?.textContent.includes('Unknown commit')");
-  await click("Reset");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const beforeInvalidViewClear = await loadState(f.root);
+  assert.equal(beforeInvalidViewClear.comments.length, 1);
+  await click("Clear");
   await browser("dialog", "accept");
-  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
+  const afterInvalidViewClear = await waitState((state) => !state.comments.length);
+  assert.deepEqual(afterInvalidViewClear.view, beforeInvalidViewClear.view);
+  assert.deepEqual(afterInvalidViewClear.reviewed, {});
   assert.deepEqual(await comments(), []);
-  console.log("PASS corrupt/obsolete view state falls back safely; missing commits remain recoverable with Reset");
+  assert.match(await evaluate("document.querySelector('[role=alert]').textContent"), /Unknown commit/);
+  console.log("PASS corrupt/obsolete view state falls back safely; Clear removes comments without changing an invalid saved view");
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);
   console.log("PASS no browser errors\nBrowser verification complete.");
