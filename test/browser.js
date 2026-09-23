@@ -1049,20 +1049,26 @@ try {
     await evaluate("document.querySelector('main').textContent"),
     /No changes to review/,
   );
-  await browser("press", "g");
-  await browser("press", "c");
-  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
-  await browser("press", "g");
-  await browser("press", "u");
+  // Re-selecting the current mode is still an explicit refresh.
+  await reviewScope("Uncommitted changes");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('pending = true')`,
+  );
+  await reviewScope("File Browser");
+  const infoBeforeGf = await evaluate(
+    "performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length",
+  );
+  await browser("press", "g");
+  await browser("press", "f");
+  await wait(
+    `performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length > ${infoBeforeGf}`,
   );
   await browser("press", "g");
   await browser("press", "c");
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
   assert.equal((await comments()).length, 2);
   console.log(
-    "PASS clean state stays unchanged after a new commit + edit + focus; zero background API calls; G C refreshes the newest commit and G U reveals uncommitted changes",
+    "PASS focus causes zero background API calls; selecting or jumping to a view mode refreshes repository data; G C opens the newest commit",
   );
   await reviewCommit(f.second);
   await wait(

@@ -424,10 +424,9 @@ function legacyState(root: string): SavedState | null {
   }
 }
 
-async function loadFile(path: string, ref: string): Promise<Source> {
-  const file = await api<Source>("file", { path, ref });
-  // File contents are immutable for this page's manual-refresh snapshot.
-  return file && { ...file, cacheKey: JSON.stringify([ref, path]) };
+async function loadFile(path: string, ref: string, refresh: number): Promise<Source> {
+  const file = await api<Source>("file", { path, ref, refresh: String(refresh) });
+  return file && { ...file, cacheKey: JSON.stringify([refresh, ref, path]) };
 }
 
 const workerPoolOptions = { workerFactory: () => new DiffWorker(), poolSize: 2 };
@@ -1159,6 +1158,7 @@ function PanelResizeHandle({
 function App() {
   const [loaded, setLoaded] = useState<{ info: Info; state: SavedState }>();
   const [error, setError] = useState("");
+  const infoRequest = useRef(0);
   useEffect(() => {
     Promise.all([
       api<Info>("info"),
@@ -1186,8 +1186,10 @@ function App() {
       info={loaded.info}
       state={loaded.state}
       refreshInfo={async () => {
-        const info = await api<Info>("info", { refresh: String(Date.now()) });
-        setLoaded((current) => current ? { ...current, info } : current);
+        const request = ++infoRequest.current;
+        const info = await api<Info>("info", { refresh: crypto.randomUUID() });
+        if (request === infoRequest.current)
+          setLoaded((current) => current ? { ...current, info } : current);
         return info;
       }}
     />
@@ -1258,6 +1260,8 @@ function Review({
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const comparisonRequest = useRef(0);
+  const viewRefresh = useRef(0);
+  const [contentRevision, setContentRevision] = useState(0);
   const keySequence = useRef("");
   const keySequenceTimer = useRef<number | undefined>(undefined);
   const reviewHistory = useRef<{
@@ -1413,13 +1417,13 @@ function Review({
     setError("");
     const load =
       tab === "files"
-        ? loadFile(selected, "").then((newFile) => ({
+        ? loadFile(selected, "", contentRevision).then((newFile) => ({
             oldFile: null,
             newFile,
           }))
         : Promise.all([
-            loadFile(selected, comparison.base),
-            loadFile(selected, comparison.target),
+            loadFile(selected, comparison.base, contentRevision),
+            loadFile(selected, comparison.target, contentRevision),
           ]).then(([oldFile, newFile]) => ({ oldFile, newFile }));
     load
       .then((value) => {
@@ -1434,15 +1438,18 @@ function Review({
     return () => {
       active = false;
     };
-  }, [selected, paths, tab, comparison, messageView, restoring, contentKey]);
+  }, [selected, paths, tab, comparison, messageView, restoring, contentKey, contentRevision]);
 
   async function compare(
     nextMode: string,
     nextTo = to,
     nextFrom = from,
     restore = false,
+    refreshedInfo?: Info,
+    refresh = restore ? 0 : ++viewRefresh.current,
   ) {
     const id = ++comparisonRequest.current;
+    if (!restore) setContentRevision(refresh);
     if (!restore) {
       setMode(nextMode);
       setSearch("");
@@ -1453,13 +1460,16 @@ function Review({
     setHighlight(null);
     setPendingComment(null);
     try {
+      const nextInfo = restore ? info : refreshedInfo || await refreshInfo();
+      if (id !== comparisonRequest.current) return;
       const result =
         nextMode === "working"
-          ? info.working
+          ? nextInfo.working
           : await api<Comparison>("compare", {
               mode: nextMode,
               from: nextFrom,
               to: nextTo,
+              refresh: String(refresh),
             });
       if (id !== comparisonRequest.current) return;
       setComparison(result);
@@ -1512,9 +1522,8 @@ function Review({
   const start = range ? Math.min(range.start, range.end) : 1;
   const end = range ? Math.max(range.start, range.end) : 1;
 
-  function matchesView(comment: Comment) {
+  function matchesScope(comment: Comment) {
     return (
-      comment.path === selected &&
       (tab === "files"
         ? comment.context === "File"
         : comment.comparison
@@ -1522,6 +1531,9 @@ function Review({
             comment.comparison.target === comparison.target
           : comment.context === compareLabel)
     );
+  }
+  function matchesView(comment: Comment) {
+    return comment.path === selected && matchesScope(comment);
   }
   function commentRange(comment: Comment): SelectedLineRange {
     return {
@@ -1630,8 +1642,23 @@ function Review({
       setPendingComment(comment);
       return;
     }
+    if (matchesScope(comment)) {
+      setSelected(comment.path);
+      setPendingComment(comment);
+      return;
+    }
+    const refresh = ++viewRefresh.current;
+    setContentRevision(refresh);
     setLoaded(undefined);
     setSearch("");
+    let nextInfo: Info;
+    try {
+      nextInfo = await refreshInfo();
+      if (id !== comparisonRequest.current) return;
+    } catch (e) {
+      if (id === comparisonRequest.current) setError((e as Error).message);
+      return;
+    }
     if (comment.context === "File") {
       setTab("files");
       setComparing(false);
@@ -1645,19 +1672,20 @@ function Review({
               : "range";
         const [base, target] = comment.context.split(" → ");
         const result =
-          comment.comparison ||
-          (nextMode === "working"
-            ? info.working
-            : await api<Comparison>("compare", {
+          nextMode === "working"
+            ? nextInfo.working
+            : comment.comparison ||
+              await api<Comparison>("compare", {
                 mode: nextMode,
                 from: base,
                 to: nextMode === "commit" ? comment.context.slice(7) : target,
-              }));
+                refresh: String(refresh),
+              });
         if (id !== comparisonRequest.current) return;
         setComparison(result);
         setMode(nextMode);
         setFrom(result.base);
-        setTo(result.target || info.commits[0]?.id || "");
+        setTo(result.target || nextInfo.commits[0]?.id || "");
         setTab("changes");
         setComparing(false);
       } catch (e) {
@@ -1727,7 +1755,17 @@ function Review({
     }
   }
 
-  function changeTab(value: "files" | "changes") {
+  function changeTab(value: "files" | "changes", refresh = true) {
+    if (refresh) {
+      comparisonRequest.current++;
+      if (value === "files") setComparing(false);
+      const request = ++viewRefresh.current;
+      setContentRevision(request);
+      void refreshInfo().catch((error) => {
+        if (request === viewRefresh.current)
+          setError((error as Error).message);
+      });
+    }
     setTab(value);
     setSearch("");
     setRange(null);
@@ -1913,16 +1951,19 @@ function Review({
           if (key === "r") setReviewPickerRequest((value) => value + 1);
           else if (key === "f") changeTab("files");
           else if (key === "u") {
-            changeTab("changes");
+            changeTab("changes", false);
             void compare("working");
           } else {
+            const refresh = ++viewRefresh.current;
+            setContentRevision(refresh);
             void refreshInfo()
               .then((nextInfo) => {
+                if (refresh !== viewRefresh.current) return;
                 const latest = nextInfo.commits[0]?.id;
                 if (!latest) return;
                 setTo(latest);
-                changeTab("changes");
-                void compare("commit", latest);
+                changeTab("changes", false);
+                void compare("commit", latest, from, false, nextInfo, refresh);
               })
               .catch((error) => setError((error as Error).message));
           }
@@ -1994,12 +2035,12 @@ function Review({
           comparing={comparing}
           onFiles={() => changeTab("files")}
           onWorking={() => {
-            changeTab("changes");
+            changeTab("changes", false);
             void compare("working");
           }}
           onCommit={(value) => {
             setTo(value);
-            changeTab("changes");
+            changeTab("changes", false);
             void compare("commit", value);
           }}
           onRangeDraft={(nextFrom, nextTo) => {
@@ -2008,7 +2049,7 @@ function Review({
             setTo(nextTo);
           }}
           onRange={() => {
-            changeTab("changes");
+            changeTab("changes", false);
             void compare("range");
           }}
           openRequest={reviewPickerRequest}
