@@ -1237,7 +1237,21 @@ try {
   await browser("press", "ArrowDown");
   await wait("document.querySelector('.code-view').scrollTop > 0");
   console.log("PASS selecting a file focuses its viewer for arrow-key scrolling");
-  await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  // Chromium animates native keyboard scrolling across a variable number of
+  // frames. Wait for it to stop so it cannot overwrite the position below.
+  await evaluate(`new Promise(resolve => {
+    const scroller = document.querySelector('.code-view');
+    let previous = scroller.scrollTop;
+    let stableFrames = 0;
+    function settle() {
+      const current = scroller.scrollTop;
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 5) resolve();
+      else requestAnimationFrame(settle);
+    }
+    requestAnimationFrame(settle);
+  })`);
   const explorerScroller = "document.querySelector('section[aria-label=\"Unreviewed\"] file-tree-container').shadowRoot.querySelector('[data-file-tree-virtualized-scroll=\"true\"]')";
   await evaluate(`${explorerScroller}.scrollTop = ${explorerScroller}.scrollHeight`);
   await evaluate("document.querySelector('.code-view').scrollTop = 1200");
