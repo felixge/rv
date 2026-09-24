@@ -1648,6 +1648,7 @@ function Review({
     () => paths.filter((path) => path.toLowerCase().includes(fileSearch)),
     [paths, fileSearch],
   );
+  const selectedEntry = comparison.entries.find((entry) => entry.path === selected);
   const messageView =
     tab === "changes" &&
     selected === MESSAGE_PATH &&
@@ -2964,6 +2965,18 @@ function Review({
                   ? selected
                   : "No file selected"}
             </a>
+            {diffView &&
+              selectedEntry?.additions != null &&
+              selectedEntry.deletions != null && (
+                <span
+                  className="file-diff-stats line-stats"
+                  aria-label={`${selectedEntry.additions} lines added, ${selectedEntry.deletions} lines removed`}
+                  title="Lines changed"
+                >
+                  <span className="lines-added">+{selectedEntry.additions}</span>
+                  <span className="lines-removed">−{selectedEntry.deletions}</span>
+                </span>
+              )}
             <div className="view-controls">
               {tab === "changes" && !messageView && (
                 <div className="viewer-modes" role="group" aria-label="File view">

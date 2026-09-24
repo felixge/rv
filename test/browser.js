@@ -273,7 +273,12 @@ try {
 
   await browser("open", `${url}/?mode=commit&to=${f.second}&path=src%2Fshipping.ts`);
   await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
+  assert.equal(
+    await evaluate("document.querySelector('.file-diff-stats')?.getAttribute('aria-label')"),
+    "1 lines added, 1 lines removed",
+  );
   await browser("click", '[aria-label="View old"]');
+  assert.equal(await evaluate("Boolean(document.querySelector('.file-diff-stats'))"), false);
   const modeSourceURL = await evaluate("location.href");
   for (const mode of ["diff", "new", "old"]) {
     const selector = `[aria-label="View ${mode}"]`;

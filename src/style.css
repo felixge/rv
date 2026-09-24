@@ -748,6 +748,10 @@ button.panel-toggle:hover {
 .file-path[href]:focus-visible {
   text-decoration: underline;
 }
+.file-diff-stats {
+  margin-left: 0;
+  font-size: 10px;
+}
 .review-toggle {
   margin-left: auto;
   flex-shrink: 0;
