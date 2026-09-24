@@ -165,6 +165,42 @@ const otherSearchHighlights = () =>
   evaluate(`Array.from(CSS.highlights.get('rv-text-search-matches') || [])
     .filter(range => range.startContainer.isConnected)
     .map(range => ({ text: range.toString(), left: Math.round(range.getBoundingClientRect().left) }))`);
+async function selectCodeText(text, occurrence = 0) {
+  const points = await evaluate(`(() => {
+    const root = ${shadow};
+    const matches = [];
+    for (const line of root.querySelectorAll('[data-line]')) {
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        let start = node.data.indexOf(${JSON.stringify(text)});
+        while (start !== -1) {
+          matches.push({ node, start });
+          start = node.data.indexOf(${JSON.stringify(text)}, start + 1);
+        }
+      }
+    }
+    const match = matches[${occurrence}];
+    if (!match) throw new Error('Could not select code text');
+    const firstCharacter = document.createRange();
+    firstCharacter.setStart(match.node, match.start);
+    firstCharacter.setEnd(match.node, match.start + 1);
+    const selectedText = document.createRange();
+    selectedText.setStart(match.node, match.start);
+    selectedText.setEnd(match.node, match.start + ${JSON.stringify(text)}.length);
+    const start = firstCharacter.getBoundingClientRect();
+    const end = selectedText.getBoundingClientRect();
+    return {
+      startX: Math.round(start.left + 1),
+      endX: Math.round(end.right - 1),
+      y: Math.round(end.top + end.height / 2),
+    };
+  })()`);
+  await browser("mouse", "move", String(points.startX), String(points.y));
+  await browser("mouse", "down", "left");
+  await browser("mouse", "move", String(points.endX), String(points.y));
+  await browser("mouse", "up", "left");
+}
 async function expectHintAfter(number, text) {
   assert.equal(
     await evaluate(`(() => {
@@ -1944,6 +1980,35 @@ try {
   assert.equal((await activeSearchHighlight()).side, "additions");
   await browser("press", "Escape");
   console.log("PASS occurrence search preserves deletion/addition sides in split diffs");
+
+  // Selecting code uses occurrence highlighting without opening the find UI.
+  // The selected occurrence, rather than the first source occurrence, stays active.
+  await f.write(
+    "src/selection.ts",
+    "const first = 'selectionTarget';\nconst second = 'selectionTarget';\n",
+  );
+  await browser("open", `${url}/?mode=files&path=src%2Fselection.ts`);
+  await wait(`${shadow}?.querySelector('[data-line="2"]')?.textContent.includes('selectionTarget')`);
+  await selectCodeText("selectionTarget", 1);
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
+  assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
+  assert.deepEqual(
+    { text: (await activeSearchHighlight()).text, line: (await activeSearchHighlight()).line },
+    { text: "selectionTarget", line: 2 },
+  );
+  assert.deepEqual((await otherSearchHighlights()).map(({ text }) => text), ["selectionTarget"]);
+  await capture("text-selection-file");
+  console.log("PASS selecting text in a file highlights the selection and other matches without opening find");
+
+  await browser("open", `${url}/?mode=working&path=src%2Fsearch-sides.ts`);
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('sideTarget new')`);
+  await selectCodeText("sideTarget", 1);
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
+  assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
+  assert.equal((await activeSearchHighlight()).side, "additions");
+  assert.deepEqual((await otherSearchHighlights()).map(({ text }) => text), ["sideTarget"]);
+  await capture("text-selection-diff");
+  console.log("PASS selecting text in a diff highlights the selected side and the other match without opening find");
 
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);

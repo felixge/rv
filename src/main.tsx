@@ -1499,6 +1499,7 @@ function Review({
   const [showPrompt, setShowPrompt] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showTextSearch, setShowTextSearch] = useState(false);
+  const [highlightSelectedText, setHighlightSelectedText] = useState(false);
   const [textSearch, setTextSearch] = useState("");
   const [activeTextMatch, setActiveTextMatch] = useState(0);
   const [reviewPickerRequest, setReviewPickerRequest] = useState(0);
@@ -1517,6 +1518,7 @@ function Review({
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const viewerContainer = useRef<HTMLDivElement>(null);
   const textSearchInput = useRef<HTMLInputElement>(null);
+  const selectedTextMatch = useRef<number | null>(null);
   const interactionVersion = useRef(0);
   const viewerFocusRequest = useRef<number | null>(null);
   const viewerScrollKey = JSON.stringify(["viewer", contentKey, viewerMode]);
@@ -1904,8 +1906,74 @@ function Review({
     [textSearch, fileSource, fileDiff, split, expanded],
   );
   const currentTextMatch = textMatches[activeTextMatch];
+  useEffect(() => {
+    const onTextSelection = (event: Event) => {
+      const host = viewerContainer.current?.querySelector("diffs-container");
+      const shadow = host?.shadowRoot;
+      if (!host || !event.composedPath().includes(host)) return;
+      const selection = (
+        shadow as ShadowRoot & { getSelection?: () => Selection | null }
+      )?.getSelection?.() || document.getSelection();
+      const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
+      const startElement = range?.startContainer instanceof Element
+        ? range.startContainer
+        : range?.startContainer.parentElement;
+      const endElement = range?.endContainer instanceof Element
+        ? range.endContainer
+        : range?.endContainer.parentElement;
+      const startLine = startElement?.closest<HTMLElement>("[data-line]");
+      const endLine = endElement?.closest<HTMLElement>("[data-line]");
+      const query = selection?.toString() || "";
+      if (
+        !range || range.collapsed || !shadow || !startLine ||
+        startLine !== endLine || !shadow.contains(startLine) || query.includes("\n")
+      ) {
+        setHighlightSelectedText(false);
+        return;
+      }
+
+      const beforeSelection = document.createRange();
+      beforeSelection.selectNodeContents(startLine);
+      beforeSelection.setEnd(range.startContainer, range.startOffset);
+      const start = beforeSelection.toString().length;
+      const side = startLine.closest("[data-deletions]") ||
+          startLine.dataset.lineType?.includes("deletion")
+        ? "deletions"
+        : startLine.closest("[data-additions]") ||
+            startLine.dataset.lineType?.includes("addition")
+          ? "additions"
+          : undefined;
+      const matches = textSearchMatches(query, fileSource || null, fileDiff, split, expanded);
+      const selectedMatch = matches.findIndex((match) =>
+        match.line === Number(startLine.dataset.line) &&
+        match.start === start && match.side === side
+      );
+      if (selectedMatch === -1) {
+        setHighlightSelectedText(false);
+        return;
+      }
+      setTextSearch(query);
+      selectedTextMatch.current = selectedMatch;
+      setActiveTextMatch(selectedMatch);
+      setHighlightSelectedText(true);
+      setShowTextSearch(false);
+    };
+    document.addEventListener("pointerup", onTextSelection);
+    document.addEventListener("dblclick", onTextSelection);
+    return () => {
+      document.removeEventListener("pointerup", onTextSelection);
+      document.removeEventListener("dblclick", onTextSelection);
+    };
+  }, [fileSource, fileDiff, split, expanded]);
   useEffect(
-    () => setActiveTextMatch(0),
+    () => setHighlightSelectedText(false),
+    [contentKey, viewerMode],
+  );
+  useEffect(
+    () => {
+      setActiveTextMatch(selectedTextMatch.current ?? 0);
+      selectedTextMatch.current = null;
+    },
     [textSearch, contentKey, viewerMode, split, expanded],
   );
   useEffect(() => {
@@ -1921,7 +1989,10 @@ function Review({
   useEffect(() => {
     CSS.highlights.delete(textSearchHighlightName);
     CSS.highlights.delete(textSearchMatchesHighlightName);
-    if (!showTextSearch || !currentTextMatch || !viewerContainer.current) return;
+    if (
+      (!showTextSearch && !highlightSelectedText) ||
+      !currentTextMatch || !viewerContainer.current
+    ) return;
     const host = viewerContainer.current.querySelector("diffs-container");
     const shadow = host?.shadowRoot;
     if (!shadow) return;
@@ -2021,7 +2092,7 @@ function Review({
       CSS.highlights.delete(textSearchMatchesHighlightName);
       style.remove();
     };
-  }, [showTextSearch, textMatches, currentTextMatch, contentKey, viewerMode]);
+  }, [showTextSearch, highlightSelectedText, textMatches, currentTextMatch, contentKey, viewerMode]);
   const moveTextMatch = (offset: number) => {
     if (!textMatches.length) return;
     setActiveTextMatch((current) =>
@@ -2029,6 +2100,7 @@ function Review({
     );
   };
   const openTextSearch = () => {
+    setHighlightSelectedText(false);
     setShowTextSearch(true);
     requestAnimationFrame(() => {
       textSearchInput.current?.focus();
