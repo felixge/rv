@@ -1100,10 +1100,15 @@ try {
   })()`);
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
   assert.equal(await evaluate("window.gcInfoRequests"), 1);
+  await evaluate("new Promise(resolve => setTimeout(resolve, 200))");
+  await browser("press", "g");
+  await browser("press", "c");
+  await wait("window.gcInfoRequests === 2");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Commit created after page load')`);
   await evaluate("window.fetch = window.fetchBeforeGc");
   assert.equal((await comments()).length, 2);
   console.log(
-    "PASS focus causes zero background API calls; selecting or jumping to a view mode refreshes repository data; repeated G C opens the newest commit once",
+    "PASS focus causes zero background API calls; selecting or jumping to a view mode refreshes repository data; overlapping and sequential G C open the newest commit safely",
   );
   await reviewCommit(f.second);
   await wait(

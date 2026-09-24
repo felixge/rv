@@ -1356,6 +1356,19 @@ function Review({
     tab === "changes" &&
     selected === MESSAGE_PATH &&
     comparison.message !== undefined;
+  const messageContent = useMemo<Content | undefined>(
+    () => comparison.message === undefined
+      ? undefined
+      : {
+          oldFile: null,
+          newFile: {
+            name: "COMMIT_MESSAGE.txt",
+            contents: comparison.message,
+            cacheKey: contentKey,
+          },
+        },
+    [comparison.message, contentKey],
+  );
   const reviewScope =
     tab === "files"
       ? "files"
@@ -1392,17 +1405,10 @@ function Review({
 
   useEffect(() => {
     if (restoring) return;
-    if (messageView) {
+    if (messageView && messageContent) {
       setLoaded({
         key: contentKey,
-        content: {
-          oldFile: null,
-          newFile: {
-            name: "COMMIT_MESSAGE.txt",
-            contents: comparison.message!,
-            cacheKey: contentKey,
-          },
-        },
+        content: messageContent,
       });
       setLoading(false);
       setError("");
@@ -1439,7 +1445,7 @@ function Review({
     return () => {
       active = false;
     };
-  }, [selected, paths, tab, comparison, messageView, restoring, contentKey, contentRevision]);
+  }, [selected, paths, tab, comparison, messageView, messageContent, restoring, contentKey, contentRevision]);
 
   async function compare(
     nextMode: string,
