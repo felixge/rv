@@ -46,6 +46,8 @@ button:disabled {
   cursor: default;
 }
 button:focus-visible,
+.segmented a:focus-visible,
+.expand-all:focus-visible,
 .viewer-modes a:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -775,8 +777,20 @@ button.panel-toggle:hover {
   font-size: 10px;
   padding: 5px 8px;
 }
+.expand-all {
+  cursor: pointer;
+  border: 1px solid #d9dee5;
+  background: #fff;
+  color: #4a515c;
+  border-radius: 5px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.expand-all:hover {
+  background: #f1f4f8;
+}
 .wrap-toggle[aria-pressed="true"],
-.expand-all[aria-pressed="true"] {
+.expand-all[aria-current="true"] {
   color: #125eaa;
   background: #eaf2fc;
   border-color: #b8d1ec;
@@ -788,22 +802,24 @@ button.panel-toggle:hover {
   border-radius: 4px;
   padding: 2px;
 }
-.segmented button,
+.segmented a,
 .viewer-modes a {
   border: none;
   font-size: 10px;
   padding: 3px 7px;
 }
+.segmented a,
 .viewer-modes a {
   color: #4a515c;
   border-radius: 5px;
   font-weight: 500;
   text-decoration: none;
 }
+.segmented a:hover,
 .viewer-modes a:hover {
   background: #f1f4f8;
 }
-.segmented button[aria-pressed="true"],
+.segmented a[aria-current="true"],
 .viewer-modes a[aria-current="true"] {
   background: #edf1f6;
   color: #3f5b7c;

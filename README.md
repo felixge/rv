@@ -50,7 +50,8 @@ are temporary and do not survive reload.
 In the diff viewer, choose **Diff**, **Old**, or **New** to see the comparison
 or the complete file before or after the change. File links preserve this
 choice in the URL (`view=diff`, `view=old`, or `view=new`). Comments on Old and
-New use that revision's line numbers.
+New use that revision's line numbers. Split diffs and expanded unchanged lines
+are also preserved in links and browser history.
 
 Your review state (comments, reviewed marks, layout preferences) is cached on local
 disk, outside the repository, in one readable directory per opened path —

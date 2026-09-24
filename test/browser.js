@@ -373,9 +373,11 @@ try {
   await wait("document.querySelector('.code-pane').textContent.includes('File does not exist in the new revision')");
   await browser("click", '[aria-label="View old"]');
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('freeShipping = false')`);
-  await browser("open", `${url}/?mode=working&path=src%2Fshipping.ts&view=unknown`);
+  await browser("open", `${url}/?mode=working&path=src%2Fshipping.ts&view=unknown&split=invalid&expanded=invalid`);
   await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
   assert.equal(await evaluate("document.querySelector('[aria-label=\"View diff\"]').getAttribute('aria-current')"), "true");
+  assert.equal(await evaluate("document.querySelector('.segmented a:first-child').getAttribute('aria-current')"), "true");
+  assert.ok(await evaluate(`Boolean(${shadow}.querySelector('[data-unmodified-lines]'))`));
   await browser("open", url);
   await wait("document.querySelector('.file-tree')");
   assert.equal(await evaluate("Boolean(document.querySelector('.viewer-modes'))"), false);
@@ -573,23 +575,35 @@ try {
   await browser("press", "e");
   await wait(`!${shadow}.querySelector('[data-unmodified-lines]')`);
   assert.equal(
-    await evaluate("document.querySelector('.expand-all').getAttribute('aria-pressed')"),
+    await evaluate("document.querySelector('.expand-all').getAttribute('aria-current')"),
     "true",
   );
+  assert.equal(await evaluate("new URL(location.href).searchParams.get('expanded')"), "true");
   await browser("press", "c");
   await wait(`${shadow}.querySelector('[data-unmodified-lines]')`);
+  await browser("press", "e");
+  await wait(`!${shadow}.querySelector('[data-unmodified-lines]')`);
+  await browser("reload");
+  await wait(`document.querySelector('.expand-all')?.textContent === 'Collapse all' && !${shadow}?.querySelector('[data-unmodified-lines]')`);
+  await browser("find", "role", "link", "click", "--name", "Collapse all", "--exact");
+  await wait(`${shadow}.querySelector('[data-unmodified-lines]')`);
   assert.equal(
-    await evaluate("document.querySelector('.expand-all').getAttribute('aria-pressed')"),
-    "false",
+    await evaluate("document.querySelector('.expand-all').hasAttribute('aria-current')"),
+    false,
   );
+  assert.equal(await evaluate("new URL(location.href).searchParams.has('expanded')"), false);
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
   console.log("PASS E/C expand and collapse the viewed file diff; M toggles comments");
   await browser("press", "v");
   assert.equal(
-    await evaluate("document.querySelector('.segmented button:last-child').getAttribute('aria-pressed')"),
+    await evaluate("document.querySelector('.segmented a:last-child').getAttribute('aria-current')"),
     "true",
   );
+  assert.equal(await evaluate("new URL(location.href).searchParams.get('split')"), "true");
+  const urlOwnedView = await waitState((state) => state.view && !("split" in state.view));
+  assert.equal("expanded" in urlOwnedView.view, false);
   await browser("press", "v");
+  assert.equal(await evaluate("new URL(location.href).searchParams.has('split')"), false);
   await browser("press", "g");
   await browser("press", "f");
   await wait("document.querySelector('[aria-label=\"Review scope\"]').textContent.includes('File Browser')");
@@ -909,7 +923,7 @@ try {
     ),
     "change-deletion",
   );
-  await click("Split");
+  await browser("find", "role", "link", "click", "--name", "Split", "--exact");
   await wait(`${shadow}?.querySelector('[data-diff-type="split"]')`);
   const splitContentWidths = await evaluate(
     `Array.from(${shadow}.querySelectorAll('[data-content]')).slice(0, 2).map(element => element.getBoundingClientRect().width)`,
@@ -1365,7 +1379,7 @@ try {
   await wait("document.querySelector('.code-view').scrollTop === 1300");
   assert.deepEqual(
     await evaluate("Array.from(new URL(location.href).searchParams.keys()).sort()"),
-    ["mode", "path", "view"],
+    ["mode", "path", "split", "view"],
   );
   await browser("tab", "close", modeScrollTab.tabId);
   await browser("tab", originalTab);

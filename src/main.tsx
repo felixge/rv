@@ -491,7 +491,6 @@ function readView(info: Info, stored: unknown) {
     to: info.commits[0]?.id || "",
     selected: "",
     search: "",
-    split: false,
     wrap: false,
     showFiles: true,
     showComments: true,
@@ -539,12 +538,25 @@ function readView(info: Info, stored: unknown) {
   if (params.has("path")) defaults.selected = params.get("path")!;
   const view = params.get("view");
   const viewerMode: ViewerMode = view === "old" || view === "new" ? view : "diff";
-  return { ...defaults, viewerMode };
+  return {
+    ...defaults,
+    viewerMode,
+    split: params.get("split") === "true",
+    expanded: params.get("expanded") === "true",
+  };
 }
 
-function viewHref(tab: string, comparison: Comparison, path: string, viewerMode: ViewerMode) {
+function viewHref(
+  tab: string,
+  comparison: Comparison,
+  path: string,
+  viewerMode: ViewerMode,
+  split: boolean,
+  expanded: boolean,
+) {
   const url = new URL(location.href);
-  for (const key of ["mode", "from", "to", "path", "view"]) url.searchParams.delete(key);
+  for (const key of ["mode", "from", "to", "path", "view", "split", "expanded"])
+    url.searchParams.delete(key);
   url.searchParams.set("mode", tab === "files" ? "files" : !comparison.target
     ? "working" : comparison.message !== undefined ? "commit" : "range");
   if (tab === "changes") url.searchParams.set("view", viewerMode);
@@ -553,6 +565,8 @@ function viewHref(tab: string, comparison: Comparison, path: string, viewerMode:
     url.searchParams.set("to", comparison.target);
   }
   if (path) url.searchParams.set("path", path);
+  if (split) url.searchParams.set("split", "true");
+  if (expanded) url.searchParams.set("expanded", "true");
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -1476,7 +1490,7 @@ function Review({
   const [loading, setLoading] = useState(false);
   const [split, setSplit] = useState(saved.split);
   const [wrap, setWrap] = useState(saved.wrap);
-  const [expandedDiff, setExpandedDiff] = useState("");
+  const [expanded, setExpanded] = useState(saved.expanded);
   const [range, setRange] = useState<SelectedLineRange | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<string>();
@@ -1542,18 +1556,19 @@ function Review({
         () => setRestoring(false),
       );
   }, []);
-  const fileHref = (path: string) => viewHref(tab, comparison, path, viewerMode);
+  const fileHref = (path: string) =>
+    viewHref(tab, comparison, path, viewerMode, split, expanded);
   const initialURL = useRef(true);
   useEffect(() => {
     if (restoring || comparing || error) return;
-    const href = viewHref(tab, comparison, selected, viewerMode);
+    const href = viewHref(tab, comparison, selected, viewerMode, split, expanded);
     if (initialURL.current) {
       history.replaceState(null, "", href);
       initialURL.current = false;
     } else if (href !== `${location.pathname}${location.search}${location.hash}`) {
       history.pushState(null, "", href);
     }
-  }, [restoring, comparing, error, tab, comparison, selected, viewerMode]);
+  }, [restoring, comparing, error, tab, comparison, selected, viewerMode, split, expanded]);
   useEffect(() => {
     // Back/Forward use the same loading path as a direct link or new tab.
     const restoreURL = () => location.reload();
@@ -1570,7 +1585,7 @@ function Review({
   useEffect(() => {
     // Mutable views are only reviewed for this page snapshot.
     const next: SavedState = {
-      view: { search, split, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
+      view: { search, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
       reviewed: Object.fromEntries(
         Object.entries(reviewed).filter(
           ([scope]) => scope !== "files" && scope !== "working",
@@ -1588,7 +1603,7 @@ function Review({
     const timer = setTimeout(() => stateFlush.current(), 250);
     return () => clearTimeout(timer);
   }, [
-    search, split, wrap, showFiles, showComments, filesWidth, commentsWidth,
+    search, wrap, showFiles, showComments, filesWidth, commentsWidth,
     collapsed, reviewed, comments,
   ]);
   useEffect(() => {
@@ -1820,10 +1835,10 @@ function Review({
       itemMetrics: { lineHeight: 23 },
       pointerEventsOnScroll: true,
       overflow: wrap ? ("wrap" as const) : ("scroll" as const),
-      expandUnchanged: expandedDiff === contentKey,
+      expandUnchanged: expanded,
       disableFileHeader: true,
     }),
-    [split, wrap, expandedDiff, contentKey, onSelection],
+    [split, wrap, expanded, onSelection],
   );
   const prompt = formatPrompt(comments);
   const notice = diffView
@@ -1878,14 +1893,14 @@ function Review({
       fileSource || null,
       fileDiff,
       split,
-      expandedDiff === contentKey,
+      expanded,
     ),
-    [textSearch, fileSource, fileDiff, split, expandedDiff, contentKey],
+    [textSearch, fileSource, fileDiff, split, expanded],
   );
   const currentTextMatch = textMatches[activeTextMatch];
   useEffect(
     () => setActiveTextMatch(0),
-    [textSearch, contentKey, viewerMode, split, expandedDiff],
+    [textSearch, contentKey, viewerMode, split, expanded],
   );
   useEffect(() => {
     if (!showTextSearch || !currentTextMatch || !viewer.current) return;
@@ -2489,8 +2504,8 @@ function Review({
     else if (command === "toggle-wrap") setWrap((value) => !value);
     else if (command === "toggle-files") setShowFiles((value) => !value);
     else if (command === "toggle-comments") setShowComments((value) => !value);
-    else if (command === "expand-diff" && fileDiff) setExpandedDiff(contentKey);
-    else if (command === "collapse-diff" && fileDiff) setExpandedDiff("");
+    else if (command === "expand-diff" && fileDiff) setExpanded(true);
+    else if (command === "collapse-diff" && fileDiff) setExpanded(false);
     else if (command === "refresh") location.reload();
     else if (command === "cancel") {
       setEditing(undefined);
@@ -2945,7 +2960,7 @@ function Review({
                   {(["diff", "old", "new"] as const).map((value) => (
                     <a
                       key={value}
-                      href={viewHref(tab, comparison, selected, value)}
+                      href={viewHref(tab, comparison, selected, value, split, expanded)}
                       aria-label={`View ${value}`}
                       aria-current={viewerMode === value ? "true" : undefined}
                       onClick={(event) => {
@@ -2961,31 +2976,48 @@ function Review({
               )}
               {diffView && (
                 <div className="segmented" role="group" aria-label="Diff layout">
-                  <button aria-pressed={!split} onClick={() => setSplit(false)}>
+                  <a
+                    href={viewHref(tab, comparison, selected, viewerMode, false, expanded)}
+                    aria-current={!split ? "true" : undefined}
+                    onClick={(event) => {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                      event.preventDefault();
+                      setSplit(false);
+                    }}
+                  >
                     Unified
-                  </button>
-                  <button aria-pressed={split} onClick={() => setSplit(true)}>
+                  </a>
+                  <a
+                    href={viewHref(tab, comparison, selected, viewerMode, true, expanded)}
+                    aria-current={split ? "true" : undefined}
+                    onClick={(event) => {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                      event.preventDefault();
+                      setSplit(true);
+                    }}
+                  >
                     Split
-                  </button>
+                  </a>
                 </div>
               )}
               {fileDiff && (
-                <button
+                <a
                   className="expand-all"
-                  aria-pressed={expandedDiff === contentKey}
+                  href={viewHref(tab, comparison, selected, viewerMode, split, !expanded)}
+                  aria-current={expanded ? "true" : undefined}
                   title={
-                    expandedDiff === contentKey
+                    expanded
                       ? "Collapse unchanged lines (C)"
                       : "Expand all hidden lines (E)"
                   }
-                  onClick={() =>
-                    setExpandedDiff(
-                      expandedDiff === contentKey ? "" : contentKey,
-                    )
-                  }
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    setExpanded((value) => !value);
+                  }}
                 >
-                  {expandedDiff === contentKey ? "Collapse all" : "Expand all"}
-                </button>
+                  {expanded ? "Collapse all" : "Expand all"}
+                </a>
               )}
               <button
                 className="wrap-toggle"

@@ -81,7 +81,7 @@ test("the state API round-trips browser state to disk", async (t) => {
   assert.deepEqual(await (await fetch(`${url}/api/state`, { headers })).json(), {});
 
   const state = {
-    view: { tab: "changes", mode: "working", split: true },
+    view: { tab: "changes", mode: "working", wrap: true },
     reviewed: {},
     comments: [{ id: "c1", path: "src/shipping.ts", start: 3, end: 3, text: "Hi" }],
   };
@@ -97,7 +97,7 @@ test("the state API round-trips browser state to disk", async (t) => {
   // Preferences in one tab must not overwrite another tab's newer comments.
   // Concurrent patches exercise the server's read/merge/write serialization.
   const comments = [{ id: "c2", text: "New comment from another tab" }];
-  const view = { split: false, wrap: true };
+  const view = { showFiles: false, wrap: true };
   const responses = await Promise.all([comments, view].map((value, index) =>
     fetch(`${url}/api/state`, {
       method: "PATCH", headers,

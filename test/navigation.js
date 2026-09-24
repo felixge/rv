@@ -70,7 +70,7 @@ try {
       await browser("click", '[aria-label="Review scope"]');
       await browser("find", "role", "option", "click", "--name", "Uncommitted changes");
     } else {
-      await browser("find", "role", "button", "click", "--name", "Split", "--exact");
+      await browser("find", "role", "link", "click", "--name", "Split", "--exact");
     }
     await browser("find", "role", "treeitem", "click", "--name", "alpha.ts", "--exact");
     await browser("wait", "--fn", "document.querySelector('diffs-container')?.shadowRoot?.querySelector('pre')?.textContent.includes('alpha_0')");
