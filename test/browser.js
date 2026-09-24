@@ -491,6 +491,7 @@ try {
     { outer: "none", inner: "none" },
   );
   await browser("fill", '[aria-label="Find a file"]', "shipping");
+  assert.equal(await lineStats(), "26 total lines of code");
   await tree("shipping.ts");
   await wait("document.querySelector('.file-path').textContent === 'src/shipping.ts'");
   await tree("shipping.ts");
@@ -681,6 +682,7 @@ try {
   const srcFolder = "document.querySelector('file-tree-container').shadowRoot.querySelector('[role=treeitem][aria-label=src]')";
   assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
   await browser("fill", '[aria-label="Find a file"]', "shipping.ts");
+  assert.equal(await lineStats(), "21 total lines of code");
   await browser("press", "Control+a");
   await browser("press", "Backspace");
   assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
@@ -740,6 +742,12 @@ try {
   await reviewScope("Uncommitted changes");
   await wait(`${shadow}?.querySelector('[data-line-type="change-addition"]')`);
   assert.equal(await lineStats(), "6 lines added, 4 lines removed");
+  await browser("fill", '[aria-label="Find a file"]', "shipping.ts");
+  assert.equal(await lineStats(), "3 lines added, 3 lines removed");
+  await capture("filtered-file-stats");
+  await browser("focus", '[aria-label="Find a file"]');
+  await browser("press", "Control+a");
+  await browser("press", "Backspace");
   let text = await codeText();
   assert.match(text, /THRESHOLD = 100/);
   assert.match(text, /THRESHOLD = 75/);
@@ -1650,6 +1658,12 @@ try {
   assert.match(await reviewedText(), /shipping.ts/);
   assert.equal(await lineStats(), "6 lines added, 1 lines removed");
   assert.equal(await lineStats("Reviewed"), "1 lines added, 1 lines removed");
+  await browser("fill", '[aria-label="Find a file"]', "test/");
+  assert.equal(await lineStats(), "5 lines added, 0 lines removed");
+  assert.equal(await lineStats("Reviewed"), "0 lines added, 0 lines removed");
+  await browser("focus", '[aria-label="Find a file"]');
+  await browser("press", "Control+a");
+  await browser("press", "Backspace");
   assert.doesNotMatch(
     await sectionText("Unreviewed"),
     /Commit message|shipping\.ts/,

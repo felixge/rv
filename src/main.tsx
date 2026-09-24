@@ -1643,6 +1643,11 @@ function Review({
     [tab, info.files, comparison],
   );
   const entries = tab === "files" ? info.working.entries : comparison.entries;
+  const fileSearch = search.trim().replaceAll("\\", "/").toLowerCase();
+  const filteredPaths = useMemo(
+    () => paths.filter((path) => path.toLowerCase().includes(fileSearch)),
+    [paths, fileSearch],
+  );
   const messageView =
     tab === "changes" &&
     selected === MESSAGE_PATH &&
@@ -2079,15 +2084,18 @@ function Review({
   const viewerRange = highlightedRange && !diffView
     ? { start: highlightedRange.start, end: highlightedRange.end }
     : highlightedRange;
-  const sidebarAdditions = entries.reduce(
+  const filteredEntries = entries.filter((entry) =>
+    filteredPaths.includes(entry.path),
+  );
+  const sidebarAdditions = filteredEntries.reduce(
     (sum, entry) => sum + (entry.additions || 0),
     0,
   );
-  const sidebarDeletions = entries.reduce(
+  const sidebarDeletions = filteredEntries.reduce(
     (sum, entry) => sum + (entry.deletions || 0),
     0,
   );
-  const sidebarLines = paths.reduce(
+  const sidebarLines = filteredPaths.reduce(
     (sum, path) => sum + (info.lineCounts[path] || 0),
     0,
   );
@@ -2395,24 +2403,23 @@ function Review({
   }
 
   const reviewItems = useMemo(() => {
-    const query = search.trim().replaceAll("\\", "/").toLowerCase();
     const matchingUnreviewed = unreviewedPaths.filter((path) =>
-      path.toLowerCase().includes(query),
+      filteredPaths.includes(path),
     );
     const matchingReviewed = reviewedPaths.filter((path) =>
-      path.toLowerCase().includes(query),
+      filteredPaths.includes(path),
     );
     return [
-      ...(hasMessage && !messageReviewed && "commit message".includes(query)
+      ...(hasMessage && !messageReviewed && "commit message".includes(fileSearch)
         ? [MESSAGE_PATH]
         : []),
       ...treeOrdered(matchingUnreviewed),
-      ...(hasMessage && messageReviewed && "commit message".includes(query)
+      ...(hasMessage && messageReviewed && "commit message".includes(fileSearch)
         ? [MESSAGE_PATH]
         : []),
       ...treeOrdered(matchingReviewed),
     ];
-  }, [search, hasMessage, messageReviewed, unreviewedPaths, reviewedPaths]);
+  }, [fileSearch, filteredPaths, hasMessage, messageReviewed, unreviewedPaths, reviewedPaths]);
   function moveFile(offset: number) {
     if (!reviewItems.length) return;
     const current = reviewItems.indexOf(selected);
@@ -2769,8 +2776,11 @@ function Review({
           {[false, true].map((done) => {
             if (done && !reviewedCount) return null;
             const groupPaths = done ? reviewedPaths : unreviewedPaths;
+            const filteredGroupPaths = groupPaths.filter((path) =>
+              filteredPaths.includes(path),
+            );
             const groupEntries = entries.filter((entry) =>
-              groupPaths.includes(entry.path),
+              filteredGroupPaths.includes(entry.path),
             );
             const additions = groupEntries.reduce(
               (sum, entry) => sum + (entry.additions || 0),
@@ -2786,11 +2796,11 @@ function Review({
             // The explorer lists current files, not changes: show their total
             // size in lines instead of +/− change stats.
             const explorer = tab === "files";
-            const totalLines = groupPaths.reduce(
+            const totalLines = filteredGroupPaths.reduce(
               (sum, path) => sum + (info.lineCounts[path] || 0),
               0,
             );
-            const missingLines = groupPaths.some(
+            const missingLines = filteredGroupPaths.some(
               (path) => info.lineCounts[path] == null,
             );
             return (
