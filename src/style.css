@@ -1436,6 +1436,10 @@ kbd {
   font-size: 11px;
   color: #9aa4b1;
 }
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+}
 @media (min-width: 1500px) {
   .workspace {
     --files-width: clamp(160px, var(--files-size, 260px), min(520px, 35vw));

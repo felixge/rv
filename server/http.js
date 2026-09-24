@@ -37,7 +37,56 @@ const types = {
   ".svg": "image/svg+xml",
 };
 
-export function createApp(repo, { allowRemote = false } = {}) {
+export function createAgentChannel(token) {
+  const queue = [];
+  let waiter = null;
+  return {
+    token,
+    submit(prompt) {
+      if (waiter) {
+        const current = waiter;
+        waiter = null;
+        current.resolve(prompt);
+      } else {
+        queue.push(prompt);
+      }
+    },
+    wait() {
+      if (queue.length)
+        return { promise: Promise.resolve(queue.shift()), cancel() {} };
+      if (waiter) {
+        const error = new Error("Another rv --wait is already pending.");
+        error.status = 409;
+        throw error;
+      }
+      let resolve;
+      let reject;
+      const current = {
+        resolve: (value) => resolve(value),
+        reject: (error) => reject(error),
+      };
+      const promise = new Promise((done, fail) => {
+        resolve = done;
+        reject = fail;
+      });
+      waiter = current;
+      return {
+        promise,
+        cancel() {
+          if (waiter === current) waiter = null;
+        },
+      };
+    },
+    close() {
+      if (!waiter) return;
+      const current = waiter;
+      waiter = null;
+      current.reject(new Error("Agent session stopped."));
+    },
+  };
+}
+
+export function createApp(repo, { allowRemote = false, agent = null } = {}) {
   // Serialize read/merge/write operations so simultaneous tabs cannot lose
   // unrelated sections (for example, preferences racing with a comment save).
   let stateWrite = Promise.resolve();
@@ -54,6 +103,10 @@ export function createApp(repo, { allowRemote = false } = {}) {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    const sendText = (status, body) => {
+      res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(body);
+    };
     try {
       const url = new URL(req.url, "http://localhost");
       const host = (req.headers.host || "").split(":")[0];
@@ -62,7 +115,11 @@ export function createApp(repo, { allowRemote = false } = {}) {
           error:
             "Local access only. Behind a reverse proxy? Start rv with --host 0.0.0.0.",
         });
-      if (req.method !== "GET" && url.pathname !== "/api/state")
+      if (
+        req.method !== "GET" &&
+        url.pathname !== "/api/state" &&
+        url.pathname !== "/api/agent/submit"
+      )
         return send(405, { error: "Read-only server." });
       if (url.pathname.startsWith("/api/")) {
         // Custom header + no CORS prevents other websites reading local source files.
@@ -104,8 +161,40 @@ export function createApp(repo, { allowRemote = false } = {}) {
           }
           return send(405, { error: "Unsupported method." });
         }
+        if (url.pathname === "/api/agent/status") {
+          if (!agent) return send(404, { error: "Agent mode is not enabled." });
+          if (req.headers["x-rv-agent"] !== agent.token)
+            return send(403, { error: "Invalid agent session." });
+          return send(200, { ok: true });
+        }
+        if (url.pathname === "/api/agent/wait") {
+          if (!agent) return send(404, { error: "Agent mode is not enabled." });
+          if (req.headers["x-rv-agent"] !== agent.token)
+            return send(403, { error: "Invalid agent session." });
+          const pending = agent.wait();
+          res.once("close", pending.cancel);
+          const prompt = await pending.promise;
+          res.off("close", pending.cancel);
+          return sendText(200, prompt);
+        }
+        if (url.pathname === "/api/agent/submit") {
+          if (!agent) return send(404, { error: "Agent mode is not enabled." });
+          if (req.method !== "POST")
+            return send(405, { error: "Unsupported method." });
+          const prompt = await readBody(req, MAX_STATE);
+          if (prompt === null)
+            return send(413, { error: "Prompt exceeds the 1 MiB limit." });
+          if (!prompt.trim()) return send(400, { error: "Prompt is empty." });
+          await writeState(async () => {
+            const state = (await loadState(repo.root)) || {};
+            await saveState(repo.root, { ...state, comments: [] });
+          });
+          agent.submit(prompt);
+          return send(200, { ok: true });
+        }
         const p = url.searchParams;
-        if (url.pathname === "/api/info") return send(200, await repo.info());
+        if (url.pathname === "/api/info")
+          return send(200, { ...await repo.info(), agent: Boolean(agent) });
         if (url.pathname === "/api/compare")
           return send(
             200,
@@ -156,7 +245,7 @@ export function createApp(repo, { allowRemote = false } = {}) {
       });
       res.end(data);
     } catch (error) {
-      send(error.code === "ENOENT" ? 404 : 400, {
+      send(error.status || (error.code === "ENOENT" ? 404 : 400), {
         error:
           error.code === "ENOENT"
             ? "Not found. Run npm run build first."

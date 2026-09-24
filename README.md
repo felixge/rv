@@ -73,6 +73,27 @@ full hash). The three options are mutually exclusive.
 
 Use `rv --help` for directory, port, host, and browser options.
 
+### Agent integration
+
+Start rv in agent mode to send review prompts directly to a coding agent:
+
+```sh
+rv --agent
+```
+
+The review UI shows **Submit to Agent** instead of **Copy Prompt**. Submission
+clears the comments after the prompt is accepted, while leaving rv open for
+another review. The agent receives one submitted prompt by running:
+
+```sh
+rv --wait
+```
+
+`rv --wait` prints the prompt to stdout and exits. Run it again to wait for the
+next submission. Prompts submitted between calls are queued by the running rv
+process. Coding agents can run `rv --skill` for a short description of this
+workflow.
+
 ## Development
 
 ```sh

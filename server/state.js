@@ -36,6 +36,10 @@ export function statePath(root) {
   return path.join(stateDir(root), "state.json");
 }
 
+export function agentSessionPath(root) {
+  return path.join(stateDir(root), "agent.json");
+}
+
 export async function loadState(root) {
   try {
     const state = JSON.parse(await readFile(statePath(root), "utf8"));
@@ -67,4 +71,42 @@ export async function saveState(root, state) {
 
 export async function clearState(root) {
   await rm(statePath(root), { force: true });
+}
+
+export async function loadAgentSession(root) {
+  try {
+    const session = JSON.parse(await readFile(agentSessionPath(root), "utf8"));
+    if (
+      !session ||
+      typeof session !== "object" ||
+      session.root !== root ||
+      typeof session.url !== "string" ||
+      typeof session.token !== "string"
+    )
+      return null;
+    return { url: session.url, token: session.token };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAgentSession(root, session) {
+  const file = agentSessionPath(root);
+  await mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, JSON.stringify({ version: 1, root, ...session }));
+  await rename(tmp, file);
+}
+
+export async function clearAgentSession(root, token) {
+  try {
+    const session = JSON.parse(await readFile(agentSessionPath(root), "utf8"));
+    // The readable directory encoding is lossy. Never remove a colliding
+    // repository's live-session descriptor.
+    if (session?.root === root && session.token === token)
+      await rm(agentSessionPath(root), { force: true });
+  } catch {
+    // Session cleanup is best-effort; stale descriptors are rejected by the
+    // status check before the next agent session starts.
+  }
 }

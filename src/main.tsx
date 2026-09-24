@@ -41,6 +41,7 @@ type Info = {
   root: string;
   name: string;
   isGit: boolean;
+  agent: boolean;
   branch: string;
   files: string[];
   lineCounts: Record<string, number | null>;
@@ -1499,6 +1500,9 @@ function Review({
   const [editing, setEditing] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showTextSearch, setShowTextSearch] = useState(false);
@@ -2327,6 +2331,7 @@ function Review({
 
   function saveComment() {
     if (!draft.trim()) return;
+    setSubmitted(false);
     if (editing) {
       setComments((items) =>
         items.map((item) =>
@@ -2380,6 +2385,35 @@ function Review({
       setCopyError(
         "Clipboard blocked by your browser. Use Preview to select and copy the text.",
       );
+    }
+  }
+
+  async function submitPrompt() {
+    if (!prompt || submitting) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch("/api/agent/submit", {
+        method: "POST",
+        headers: { "X-Rv": "1", "Content-Type": "text/plain" },
+        body: prompt,
+      });
+      if (!response.ok) throw new Error((await response.json()).error);
+      setComments([]);
+      setDraft("");
+      setEditing(undefined);
+      setRange(null);
+      setHighlight(null);
+      setShowPrompt(false);
+      setCopied(false);
+      setSubmitted(true);
+      pendingState.current = { ...pendingState.current, comments: [] };
+      stateDirty.current = true;
+      stateFlush.current();
+    } catch (error) {
+      setSubmitError((error as Error).message || "Could not submit the prompt.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -2772,10 +2806,18 @@ function Review({
           </button>
           <button
             className="primary copy"
-            disabled={!comments.length}
-            onClick={copyPrompt}
+            disabled={!comments.length || submitting}
+            onClick={info.agent ? submitPrompt : copyPrompt}
           >
-            {copied ? "✓ Copied" : "Copy Prompt"}
+            {info.agent
+              ? submitting
+                ? "Submitting…"
+                : submitted
+                  ? "✓ Submitted"
+                  : "Submit to Agent"
+              : copied
+                ? "✓ Copied"
+                : "Copy Prompt"}
             <span className="count">{comments.length}</span>
           </button>
         </div>
@@ -3323,6 +3365,11 @@ function Review({
                 {copyError}
               </p>
             )}
+            {submitError && (
+              <p role="alert" className="error">
+                {submitError}
+              </p>
+            )}
             {storageError && (
               <p role="alert" className="error">
                 {storageError}
@@ -3334,7 +3381,7 @@ function Review({
                 <h3>Your thoughts, ready for an agent.</h3>
                 <p>
                   Select a line in the code to add a comment. Collect your
-                  feedback here, then copy it as one prompt.
+                  feedback here, then {info.agent ? "submit" : "copy"} it as one prompt.
                 </p>
               </div>
             )}
@@ -3546,10 +3593,25 @@ function Review({
               onFocus={(event) => event.target.select()}
             />
             <div className="dialog-footer">
-              <span>Exactly what gets copied.</span>
-              <button className="primary" onClick={copyPrompt}>
-                {copied ? "✓ Copied" : "Copy Prompt"}
-              </button>
+              <span>
+                Exactly what gets {info.agent ? "submitted" : "copied"}.
+              </span>
+              <div className="dialog-actions">
+                {info.agent && (
+                  <button onClick={copyPrompt}>
+                    {copied ? "✓ Copied" : "Copy Prompt"}
+                  </button>
+                )}
+                <button
+                  className="primary"
+                  disabled={submitting}
+                  onClick={info.agent ? submitPrompt : copyPrompt}
+                >
+                  {info.agent
+                    ? submitting ? "Submitting…" : "Submit to Agent"
+                    : copied ? "✓ Copied" : "Copy Prompt"}
+                </button>
+              </div>
             </div>
           </section>
         </div>
