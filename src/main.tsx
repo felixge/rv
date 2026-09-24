@@ -21,6 +21,8 @@ import {
 import { formatPrompt, reference } from "./prompt.js";
 import "./style.css";
 
+declare const __RV_VERSION__: string;
+
 type Entry = {
   path: string;
   status: string;
@@ -2699,6 +2701,8 @@ function Review({
           No auto-refresh
           <span className="status-dot" />
           Refresh when you’re ready.
+          <span className="status-dot" />
+          rv {__RV_VERSION__}
         </span>
       </footer>
       {showPrompt && (

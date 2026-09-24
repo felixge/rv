@@ -20,6 +20,17 @@ const session = (
     "rv-test",
   ])
 ).stdout.trim();
+const rvRoot = path.resolve(import.meta.dirname, "..");
+let rvVersion;
+try {
+  rvVersion = (
+    await exec("git", ["-C", rvRoot, "describe", "--tags", "--exact-match", "HEAD"])
+  ).stdout.trim();
+} catch {
+  rvVersion = (
+    await exec("git", ["-C", rvRoot, "rev-parse", "--short", "HEAD"])
+  ).stdout.trim();
+}
 const f = await fixture();
 const server = createApp(await repository(f.root));
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -158,6 +169,13 @@ try {
   await browser("open", url);
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");
+  assert.equal(
+    await evaluate(
+      `document.querySelector('.status-right').textContent.trim().endsWith(${JSON.stringify(`rv ${rvVersion}`)})`,
+    ),
+    true,
+  );
+  console.log("PASS status bar shows the rv version");
   await hoverTree("README.md");
   await wait(
     "document.querySelector('section[aria-label=Unreviewed] file-tree-container').hasAttribute('data-file-review-action') && document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"][data-visible=true]')",
