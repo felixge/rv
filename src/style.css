@@ -784,6 +784,9 @@ button.panel-toggle:hover {
   height: 100%;
   overflow: auto;
 }
+.code-view:focus {
+  outline: none;
+}
 .comment-marker {
   display: block;
   width: 100%;

@@ -1312,6 +1312,9 @@ function Review({
   const [highlight, setHighlight] = useState<Comment | null>(null);
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
+  const viewerContainer = useRef<HTMLDivElement>(null);
+  const interactionVersion = useRef(0);
+  const viewerFocusRequest = useRef<number | null>(null);
   const comparisonRequest = useRef(0);
   const viewRefresh = useRef(0);
   const latestCommitPending = useRef(false);
@@ -1323,6 +1326,22 @@ function Review({
     paths: string[];
     reviewed: boolean;
   }[]>([]);
+  useEffect(() => {
+    const trackInteraction = () => interactionVersion.current++;
+    const trackTypingFocus = (event: FocusEvent) => {
+      if ((event.target as HTMLElement).matches(
+        "input, textarea, select, [contenteditable=true]",
+      )) trackInteraction();
+    };
+    document.addEventListener("pointerdown", trackInteraction, true);
+    document.addEventListener("keydown", trackInteraction, true);
+    document.addEventListener("focusin", trackTypingFocus);
+    return () => {
+      document.removeEventListener("pointerdown", trackInteraction, true);
+      document.removeEventListener("keydown", trackInteraction, true);
+      document.removeEventListener("focusin", trackTypingFocus);
+    };
+  }, []);
   useEffect(() => {
     if (saved.appliedMode !== "working")
       void compare(saved.appliedMode, saved.target, saved.base, true).finally(
@@ -1455,15 +1474,22 @@ function Review({
   const reviewedCount =
     reviewedPaths.length + (hasMessage && messageReviewed ? 1 : 0);
   const selectedReviewed = reviewedInView?.includes(selected) || false;
+  const focusViewer = useCallback(() => {
+    viewerContainer.current?.focus({ preventScroll: true });
+  }, []);
   const select = useCallback(
     (path: string) => {
-      if (path === selected) return;
+      if (path === selected) {
+        focusViewer();
+        return;
+      }
+      viewerFocusRequest.current = interactionVersion.current;
       setSelected(path);
       setRange(null);
       setHighlight(null);
       setPendingComment(null);
     },
-    [selected],
+    [selected, focusViewer],
   );
 
   useEffect(() => {
@@ -1714,6 +1740,17 @@ function Review({
     (sum, path) => sum + (info.lineCounts[path] || 0),
     0,
   );
+
+  useEffect(() => {
+    if (
+      viewerFocusRequest.current !== null && content && !loading && !comparing &&
+      !restoring && items.length
+    ) {
+      const request = viewerFocusRequest.current;
+      viewerFocusRequest.current = null;
+      if (request === interactionVersion.current) focusViewer();
+    }
+  }, [content, loading, comparing, restoring, items.length, focusViewer]);
 
   useEffect(() => {
     if (!pendingComment || loading || comparing || !content || !viewer.current)
@@ -2047,8 +2084,10 @@ function Review({
         if (["f", "c", "u", "r"].includes(key)) {
           event.preventDefault();
           if (key === "r") setReviewPickerRequest((value) => value + 1);
-          else if (key === "f") changeTab("files");
-          else if (key === "u") {
+          else if (key === "f") {
+            viewerFocusRequest.current = interactionVersion.current;
+            changeTab("files");
+          } else if (key === "u") {
             changeTab("changes", false);
             void compare("working");
           } else {
@@ -2561,6 +2600,10 @@ function Review({
               <>
                 <CodeView
                   ref={viewer}
+                  containerRef={(element) => {
+                    viewerContainer.current = element;
+                    if (element) element.tabIndex = 0;
+                  }}
                   className="code-view"
                   items={items}
                   options={options}

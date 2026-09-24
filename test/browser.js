@@ -1228,6 +1228,10 @@ try {
   );
   await tree("long.ts");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
+  await wait("document.activeElement === document.querySelector('.code-view')");
+  await browser("press", "ArrowDown");
+  await wait("document.querySelector('.code-view').scrollTop > 0");
+  console.log("PASS selecting a file focuses its viewer for arrow-key scrolling");
   await evaluate(
     `document.querySelector('.code-view').scrollTop = 150 * parseFloat(getComputedStyle(${shadow}.querySelector('[data-column-number="1"]')).lineHeight)`,
   );
@@ -1285,6 +1289,9 @@ try {
     `${shadow}?.querySelector('pre')?.textContent.includes('pending = true')`,
   );
   await reviewScope("File Browser");
+  await tree("long.ts");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
+  await browser("focus", '[aria-label="Review scope"]');
   const infoBeforeGf = await evaluate(
     "performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length",
   );
@@ -1293,6 +1300,11 @@ try {
   await wait(
     `performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length > ${infoBeforeGf}`,
   );
+  await wait("document.activeElement === document.querySelector('.code-view')");
+  await evaluate("document.querySelector('.code-view').scrollTop = 0");
+  await browser("press", "ArrowDown");
+  await wait("document.querySelector('.code-view').scrollTop > 0");
+  console.log("PASS G F focuses the file viewer for arrow-key scrolling");
   await evaluate(`(() => {
     window.gcInfoRequests = 0;
     window.fetchBeforeGc = window.fetch;
