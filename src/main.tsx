@@ -62,8 +62,11 @@ type Content = { oldFile: Source; newFile: Source };
 type ViewerMode = "diff" | "old" | "new";
 type TextSearchMatch = {
   line: number;
+  start: number;
+  end: number;
   side?: "additions" | "deletions";
 };
+const textSearchHighlightName = "rv-text-search";
 // The server-side disk cache, loaded once and saved back debounced.
 type SavedState = {
   view?: Record<string, unknown>;
@@ -119,7 +122,11 @@ function textSearchMatches(
     side?: TextSearchMatch["side"],
   ) => {
     const value = text?.toLowerCase() || "";
-    if (value.includes(needle)) matches.push({ line, side });
+    let start = 0;
+    while ((start = value.indexOf(needle, start)) !== -1) {
+      matches.push({ line, start, end: start + needle.length, side });
+      start += needle.length;
+    }
   };
   if (file) {
     file.contents.split("\n").forEach((line, index) => addLine(line, index + 1));
@@ -1889,6 +1896,79 @@ function Review({
       align: "center",
     });
   }, [showTextSearch, currentTextMatch, selected]);
+  useEffect(() => {
+    CSS.highlights.delete(textSearchHighlightName);
+    if (!showTextSearch || !currentTextMatch || !viewerContainer.current) return;
+    const host = viewerContainer.current.querySelector("diffs-container");
+    const shadow = host?.shadowRoot;
+    if (!shadow) return;
+    const style = document.createElement("style");
+    style.textContent = `::highlight(${textSearchHighlightName}) {
+      color: inherit;
+      background: #ffd75e;
+    }`;
+    shadow.append(style);
+
+    const applyHighlight = () => {
+      CSS.highlights.delete(textSearchHighlightName);
+      const side = currentTextMatch.side;
+      const lines = shadow.querySelectorAll<HTMLElement>(
+        `[data-line="${currentTextMatch.line}"]`,
+      );
+      const line = !side
+        ? lines[0]
+        : Array.from(lines).find((candidate) =>
+            candidate.closest(`[data-${side}]`) ||
+            candidate.dataset.lineType?.includes(
+              side === "deletions" ? "deletion" : "addition",
+            )
+          );
+      if (!line) return false;
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let offset = 0;
+      let startNode: Text | null = null;
+      let endNode: Text | null = null;
+      let startOffset = 0;
+      let endOffset = 0;
+      while (walker.nextNode()) {
+        const node = walker.currentNode as Text;
+        const nextOffset = offset + node.data.length;
+        if (!startNode && currentTextMatch.start < nextOffset) {
+          startNode = node;
+          startOffset = currentTextMatch.start - offset;
+        }
+        if (currentTextMatch.end <= nextOffset) {
+          endNode = node;
+          endOffset = currentTextMatch.end - offset;
+          break;
+        }
+        offset = nextOffset;
+      }
+      if (!startNode || !endNode) return false;
+      const range = new Range();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+      CSS.highlights.set(textSearchHighlightName, new Highlight(range));
+      return true;
+    };
+
+    applyHighlight();
+    // CodeView first mounts plain text and later replaces it with highlighted
+    // token nodes. It also replaces lines as they enter and leave the virtual
+    // window, so rebuild the Range after either kind of DOM change.
+    const observer = new MutationObserver(applyHighlight);
+    observer.observe(shadow, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    return () => {
+      observer.disconnect();
+      CSS.highlights.delete(textSearchHighlightName);
+      style.remove();
+    };
+  }, [showTextSearch, currentTextMatch, contentKey, viewerMode]);
   const moveTextMatch = (offset: number) => {
     if (!textMatches.length) return;
     setActiveTextMatch((current) =>
@@ -1952,13 +2032,6 @@ function Review({
   const viewerRange = highlightedRange && !diffView
     ? { start: highlightedRange.start, end: highlightedRange.end }
     : highlightedRange;
-  const textSearchRange = showTextSearch && currentTextMatch
-    ? {
-        start: currentTextMatch.line,
-        end: currentTextMatch.line,
-        ...(diffView && currentTextMatch.side ? { side: currentTextMatch.side } : {}),
-      }
-    : null;
   const sidebarAdditions = entries.reduce(
     (sum, entry) => sum + (entry.additions || 0),
     0,
@@ -2978,8 +3051,8 @@ function Review({
                   items={items}
                   options={options}
                   selectedLines={
-                    textSearchRange || viewerRange
-                      ? { id: selected, range: textSearchRange || viewerRange! }
+                    viewerRange
+                      ? { id: selected, range: viewerRange }
                       : null
                   }
                   onSelectedLinesChange={(selection) =>

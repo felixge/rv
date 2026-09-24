@@ -137,6 +137,30 @@ const highlightedLines = () =>
   evaluate(
     `Array.from(new Set(Array.from(${shadow}.querySelectorAll('[data-column-number][data-selected-line]')).map(e => Number(e.dataset.columnNumber))))`,
   );
+async function activeSearchHighlight() {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const result = await evaluate(`(() => {
+      const ranges = Array.from(CSS.highlights.get('rv-text-search') || []);
+      if (ranges.length !== 1) return null;
+      const range = ranges[0];
+      const line = range.startContainer.parentElement.closest('[data-line]');
+      if (!line?.isConnected) return null;
+      return {
+        text: range.toString(),
+        line: Number(line.dataset.line),
+        side: line.closest('[data-additions]') ? 'additions' :
+          line.closest('[data-deletions]') ? 'deletions' :
+          line.dataset.lineType?.includes('addition') ? 'additions' :
+          line.dataset.lineType?.includes('deletion') ? 'deletions' : undefined,
+        acrossTokens: range.startContainer.parentElement !== range.endContainer.parentElement,
+        left: Math.round(range.getBoundingClientRect().left),
+      };
+    })()`);
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail("Expected one connected occurrence search highlight");
+}
 async function expectHintAfter(number, text) {
   assert.equal(
     await evaluate(`(() => {
@@ -1799,10 +1823,11 @@ try {
   console.log("PASS URLs round-trip reserved characters and Unicode; navigation and preference saves preserve another tab's newer comments");
 
   // Native browser find cannot see lines which CodeView has virtualized out of
-  // the DOM. Cmd/Ctrl+F must use the source text and navigate to those lines.
+  // the DOM. Cmd/Ctrl+F must navigate to every source occurrence, then create
+  // an exact range after the tokenized line appears in the shadow DOM.
   const longLines = Array.from({ length: 650 }, (_, index) =>
     index === 419 || index === 579
-      ? `const distantSearchTarget${index + 1} = "distantSearchTarget";`
+      ? `const distantSearchTarget${index + 1} = "const distantSearchTarget";`
       : `const value${index + 1} = ${index + 1};`,
   );
   await f.write("src/long.ts", `${longLines.join("\n")}\n`);
@@ -1814,21 +1839,69 @@ try {
     "The regression fixture must begin outside the virtualized DOM window",
   );
   await browser("press", "Control+f");
-  await browser("fill", '[aria-label="Find in viewed file"]', "distantSearchTarget");
-  await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
-  await wait(`${shadow}.querySelector('[data-column-number="420"][data-selected-line]')`);
-  assert.deepEqual(await highlightedLines(), [420]);
+  await browser("fill", '[aria-label="Find in viewed file"]', "const distantSearchTarget");
+  await wait("document.querySelector('.text-search span')?.textContent === '1/4'");
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
+  const firstOccurrence = await activeSearchHighlight();
+  assert.deepEqual(
+    { text: firstOccurrence.text, line: firstOccurrence.line },
+    { text: "const distantSearchTarget", line: 420 },
+  );
   await browser("press", "Enter");
-  await wait("document.querySelector('.text-search span')?.textContent === '2/2'");
-  await wait(`${shadow}.querySelector('[data-column-number="580"][data-selected-line]')`);
-  assert.deepEqual(await highlightedLines(), [580]);
+  await wait("document.querySelector('.text-search span')?.textContent === '2/4'");
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
+  const secondOccurrence = await activeSearchHighlight();
+  assert.equal(secondOccurrence.line, 420);
+  assert.equal(secondOccurrence.text, "const distantSearchTarget");
+  assert.notEqual(secondOccurrence.left, firstOccurrence.left);
+  await browser("press", "Enter");
+  await wait("document.querySelector('.text-search span')?.textContent === '3/4'");
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.toString() === 'const distantSearchTarget' && Array.from(CSS.highlights.get('rv-text-search'))[0].startContainer.isConnected");
+  assert.equal((await activeSearchHighlight()).line, 580);
   await browser("press", "Shift+Enter");
+  await wait("document.querySelector('.text-search span')?.textContent === '2/4'");
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.toString() === 'const distantSearchTarget' && Array.from(CSS.highlights.get('rv-text-search'))[0].startContainer.isConnected");
+  assert.equal((await activeSearchHighlight()).line, 420);
+  await browser("fill", '[aria-label="Find in viewed file"]', '= "const');
   await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
-  await wait(`${shadow}.querySelector('[data-column-number="420"][data-selected-line]')`);
-  assert.deepEqual(await highlightedLines(), [420]);
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.toString() === '= \"const' && Array.from(CSS.highlights.get('rv-text-search'))[0].startContainer.isConnected");
+  await wait(`${shadow}.querySelector('[data-line="420"]')?.querySelectorAll('span').length > 1`);
+  const tokenSpanningOccurrence = await activeSearchHighlight();
+  assert.deepEqual(
+    {
+      text: tokenSpanningOccurrence.text,
+      line: tokenSpanningOccurrence.line,
+      acrossTokens: tokenSpanningOccurrence.acrossTokens,
+    },
+    { text: '= "const', line: 420, acrossTokens: true },
+  );
+  await capture("occurrence-search");
   await browser("press", "Escape");
   assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
-  console.log("PASS Cmd/Ctrl+F finds, counts and cycles through lines outside the virtualized DOM window");
+  assert.equal(await evaluate("CSS.highlights.has('rv-text-search')"), false);
+  console.log("PASS Cmd/Ctrl+F counts same-line occurrences, highlights token-spanning ranges, and navigates virtualized lines");
+
+  // Diffs can use the same line number on both sides. Preserve the source
+  // match's side when locating its rendered range.
+  await f.write("src/search-sides.ts", 'const value = "sideTarget old";\n');
+  f.git("add", "src/search-sides.ts");
+  f.git("commit", "-qm", "Add occurrence search side fixture");
+  await f.write("src/search-sides.ts", 'const value = "sideTarget new";\n');
+  await browser("open", `${url}/?mode=working&path=src%2Fsearch-sides.ts`);
+  await wait("document.querySelector('.file-tree') && !document.querySelector('.loading')");
+  await tree("search-sides.ts");
+  await wait(`${shadow}?.querySelector('[data-diff]')`);
+  await browser("press", "Control+f");
+  await browser("fill", '[aria-label="Find in viewed file"]', "sideTarget");
+  await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
+  assert.equal((await activeSearchHighlight()).side, "deletions");
+  await browser("press", "Enter");
+  await wait("document.querySelector('.text-search span')?.textContent === '2/2'");
+  await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
+  assert.equal((await activeSearchHighlight()).side, "additions");
+  await browser("press", "Escape");
+  console.log("PASS occurrence search preserves deletion/addition sides in split diffs");
 
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);
