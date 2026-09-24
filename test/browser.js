@@ -1070,12 +1070,22 @@ try {
   await wait(
     `performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length > ${infoBeforeGf}`,
   );
-  await browser("press", "g");
-  await browser("press", "c");
+  await evaluate(`(() => {
+    window.gcInfoRequests = 0;
+    window.fetchBeforeGc = window.fetch;
+    window.fetch = (...args) => {
+      if (String(args[0]).startsWith('/api/info?')) window.gcInfoRequests++;
+      return window.fetchBeforeGc(...args);
+    };
+    for (const key of ['g', 'c', 'g', 'c'])
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  })()`);
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
+  assert.equal(await evaluate("window.gcInfoRequests"), 1);
+  await evaluate("window.fetch = window.fetchBeforeGc");
   assert.equal((await comments()).length, 2);
   console.log(
-    "PASS focus causes zero background API calls; selecting or jumping to a view mode refreshes repository data; G C opens the newest commit",
+    "PASS focus causes zero background API calls; selecting or jumping to a view mode refreshes repository data; repeated G C opens the newest commit once",
   );
   await reviewCommit(f.second);
   await wait(

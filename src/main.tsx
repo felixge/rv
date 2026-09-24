@@ -1259,6 +1259,7 @@ function Review({
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const comparisonRequest = useRef(0);
   const viewRefresh = useRef(0);
+  const latestCommitPending = useRef(false);
   const [contentRevision, setContentRevision] = useState(0);
   const keySequence = useRef("");
   const keySequenceTimer = useRef<number | undefined>(undefined);
@@ -1952,18 +1953,23 @@ function Review({
             changeTab("changes", false);
             void compare("working");
           } else {
+            if (latestCommitPending.current) return;
+            latestCommitPending.current = true;
             const refresh = ++viewRefresh.current;
             setContentRevision(refresh);
             void refreshInfo()
-              .then((nextInfo) => {
+              .then(async (nextInfo) => {
                 if (refresh !== viewRefresh.current) return;
                 const latest = nextInfo.commits[0]?.id;
                 if (!latest) return;
                 setTo(latest);
                 changeTab("changes", false);
-                void compare("commit", latest, from, false, nextInfo, refresh);
+                await compare("commit", latest, from, false, nextInfo, refresh);
               })
-              .catch((error) => setError((error as Error).message));
+              .catch((error) => setError((error as Error).message))
+              .finally(() => {
+                latestCommitPending.current = false;
+              });
           }
         }
         return;
