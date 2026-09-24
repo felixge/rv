@@ -1291,17 +1291,30 @@ button.panel-toggle:hover {
   outline: 0;
 }
 .shortcut-list {
-  max-height: min(470px, 58vh);
+  max-height: min(441px, 55vh);
   overflow: auto;
   padding: 0 24px;
 }
 .shortcut-row {
+  width: 100%;
   min-height: 49px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  padding: 0 12px;
   border-top: 1px solid #edf0f3;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.shortcut-row:hover,
+.shortcut-row.active {
+  background: #f4f8fc;
 }
 .shortcut-label {
   font-size: 12px;
@@ -1315,7 +1328,12 @@ button.panel-toggle:hover {
 }
 .shortcut-keys {
   display: flex;
+  align-items: center;
   gap: 5px;
+}
+.shortcut-keys small {
+  color: #99a1ac;
+  font-size: 9px;
 }
 kbd {
   min-width: 27px;
@@ -1334,6 +1352,11 @@ kbd {
   border-top: 1px solid #edf0f3;
   color: #99a1ac;
   font-size: 10px;
+}
+.shortcut-note kbd {
+  min-width: 21px;
+  margin-right: 3px;
+  padding: 2px 4px;
 }
 .shortcut-empty {
   padding: 35px 0;

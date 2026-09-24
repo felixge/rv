@@ -406,13 +406,19 @@ try {
     "['discount.ts','shipping.ts'].every(p => document.querySelector('section[aria-label=Unreviewed] file-tree-container')?.shadowRoot?.querySelector(`[role=treeitem][aria-label=\"${p}\"]`))",
   );
   console.log("PASS directory review action toggles files recursively");
+  await browser("press", "Meta+k");
+  await browser("wait", '[aria-label="Search commands and keyboard shortcuts"]');
+  await browser("fill", '[aria-label="Search commands and keyboard shortcuts"]', "find a file");
+  await browser("press", "Enter");
+  await browser("wait", '[aria-label="Fuzzy find file"]');
+  await browser("press", "Escape");
   await browser("press", "?");
-  await browser("wait", '[aria-label="Search keyboard shortcuts"]');
+  await browser("wait", '[aria-label="Search commands and keyboard shortcuts"]');
   assert.equal(
     await evaluate("document.querySelector('[role=dialog]').getAttribute('aria-labelledby')"),
     "shortcut-title",
   );
-  await browser("fill", '[aria-label="Search keyboard shortcuts"]', "copy");
+  await browser("fill", '[aria-label="Search commands and keyboard shortcuts"]', "copy");
   assert.deepEqual(
     await evaluate("Array.from(document.querySelectorAll('.shortcut-row')).map(e => e.textContent.trim())"),
     ["Copy review promptReviewY"],

@@ -187,35 +187,42 @@ function textSearchMatches(
 }
 
 type Shortcut = {
+  command: Command;
   keys: string[];
   label: string;
   category: "Navigate" | "Review" | "View" | "General";
 };
+type Command =
+  | "palette" | "find-viewed-file" | "find-file" | "search-files" | "next-file" | "previous-file"
+  | "file-browser" | "recent-commit" | "uncommitted" | "review-palette"
+  | "comment" | "toggle-reviewed" | "undo" | "save-comment" | "copy-prompt"
+  | "preview-prompt" | "toggle-diff" | "toggle-wrap" | "toggle-files"
+  | "toggle-comments" | "expand-diff" | "collapse-diff" | "refresh" | "cancel";
 const shortcuts: Shortcut[] = [
-  { keys: ["?"], label: "Show keyboard shortcuts", category: "General" },
-  { keys: ["⌘/Ctrl", "F"], label: "Find in viewed file", category: "Navigate" },
-  { keys: ["F"], label: "Find a file", category: "Navigate" },
-  { keys: ["/"], label: "Search files", category: "Navigate" },
-  { keys: ["J"], label: "Next file", category: "Navigate" },
-  { keys: ["K"], label: "Previous file", category: "Navigate" },
-  { keys: ["G", "F"], label: "Open File Browser", category: "Navigate" },
-  { keys: ["G", "C"], label: "Review most recent commit", category: "Navigate" },
-  { keys: ["G", "U"], label: "Review uncommitted changes", category: "Navigate" },
-  { keys: ["G", "R"], label: "Open review palette", category: "Navigate" },
-  { keys: ["L"], label: "Comment on a line or range", category: "Review" },
-  { keys: ["R"], label: "Toggle reviewed", category: "Review" },
-  { keys: ["U"], label: "Undo last action", category: "Review" },
-  { keys: ["⌘/Ctrl", "Enter"], label: "Save comment", category: "Review" },
-  { keys: ["Y"], label: "Copy review prompt", category: "Review" },
-  { keys: ["P"], label: "Preview review prompt", category: "Review" },
-  { keys: ["V"], label: "Toggle unified / split diff", category: "View" },
-  { keys: ["W"], label: "Toggle long line wrapping", category: "View" },
-  { keys: ["B"], label: "Toggle file browser", category: "View" },
-  { keys: ["M"], label: "Toggle comments", category: "View" },
-  { keys: ["E"], label: "Expand viewed file diff", category: "View" },
-  { keys: ["C"], label: "Collapse viewed file diff", category: "View" },
-  { keys: ["Shift", "R"], label: "Refresh repository", category: "General" },
-  { keys: ["Esc"], label: "Close or cancel", category: "General" },
+  { command: "palette", keys: ["?", "or", "⌘", "K"], label: "Open command launcher", category: "General" },
+  { command: "find-viewed-file", keys: ["⌘/Ctrl", "F"], label: "Find in viewed file", category: "Navigate" },
+  { command: "find-file", keys: ["F"], label: "Find a file", category: "Navigate" },
+  { command: "search-files", keys: ["/"], label: "Search files", category: "Navigate" },
+  { command: "next-file", keys: ["J"], label: "Next file", category: "Navigate" },
+  { command: "previous-file", keys: ["K"], label: "Previous file", category: "Navigate" },
+  { command: "file-browser", keys: ["G", "F"], label: "Open File Browser", category: "Navigate" },
+  { command: "recent-commit", keys: ["G", "C"], label: "Review most recent commit", category: "Navigate" },
+  { command: "uncommitted", keys: ["G", "U"], label: "Review uncommitted changes", category: "Navigate" },
+  { command: "review-palette", keys: ["G", "R"], label: "Open review palette", category: "Navigate" },
+  { command: "comment", keys: ["L"], label: "Comment on a line or range", category: "Review" },
+  { command: "toggle-reviewed", keys: ["R"], label: "Toggle reviewed", category: "Review" },
+  { command: "undo", keys: ["U"], label: "Undo last action", category: "Review" },
+  { command: "save-comment", keys: ["⌘/Ctrl", "Enter"], label: "Save comment", category: "Review" },
+  { command: "copy-prompt", keys: ["Y"], label: "Copy review prompt", category: "Review" },
+  { command: "preview-prompt", keys: ["P"], label: "Preview review prompt", category: "Review" },
+  { command: "toggle-diff", keys: ["V"], label: "Toggle unified / split diff", category: "View" },
+  { command: "toggle-wrap", keys: ["W"], label: "Toggle long line wrapping", category: "View" },
+  { command: "toggle-files", keys: ["B"], label: "Toggle file browser", category: "View" },
+  { command: "toggle-comments", keys: ["M"], label: "Toggle comments", category: "View" },
+  { command: "expand-diff", keys: ["E"], label: "Expand viewed file diff", category: "View" },
+  { command: "collapse-diff", keys: ["C"], label: "Collapse viewed file diff", category: "View" },
+  { command: "refresh", keys: ["Shift", "R"], label: "Refresh repository", category: "General" },
+  { command: "cancel", keys: ["Esc"], label: "Close or cancel", category: "General" },
 ];
 function compareTreeSegments(left: string, right: string) {
   const leftLower = left.toLowerCase();
@@ -388,8 +395,9 @@ function FileFinder({
   );
 }
 
-function ShortcutHelp({ onClose }: { onClose: () => void }) {
+function ShortcutHelp({ onClose, onChoose }: { onClose: () => void; onChoose: (command: Command) => void }) {
   const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
   const normalized = query.trim().toLowerCase();
   const matches = shortcuts.filter((shortcut) =>
     `${shortcut.label} ${shortcut.category} ${shortcut.keys.join(" ")}`
@@ -407,36 +415,61 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
       >
         <div className="shortcut-heading">
           <div>
-            <h2 id="shortcut-title">Keyboard shortcuts</h2>
-            <p>Keep your hands on the keyboard.</p>
+            <h2 id="shortcut-title">Commands</h2>
+            <p>Run a command or look up its shortcut.</p>
           </div>
-          <button onClick={onClose} aria-label="Close keyboard shortcuts">✕</button>
+          <button onClick={onClose} aria-label="Close command launcher">✕</button>
         </div>
         <div className="shortcut-search">
           <span aria-hidden="true">⌕</span>
           <input
             autoFocus
-            aria-label="Search keyboard shortcuts"
-            placeholder="Search shortcuts…"
+            aria-label="Search commands and keyboard shortcuts"
+            placeholder="Search commands…"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActive(0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                if (matches.length)
+                  setActive((current) =>
+                    (current + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length,
+                  );
+              } else if (event.key === "Enter" && matches[active]) {
+                event.preventDefault();
+                onChoose(matches[active].command);
+              }
+            }}
           />
         </div>
-        <div className="shortcut-list">
-          {matches.map((shortcut) => (
-            <div className="shortcut-row" key={shortcut.label}>
+        <div className="shortcut-list" role="listbox" aria-label="Commands">
+          {matches.map((shortcut, index) => (
+            <button
+              type="button"
+              className={`shortcut-row${index === active ? " active" : ""}`}
+              key={shortcut.label}
+              role="option"
+              aria-selected={index === active}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => onChoose(shortcut.command)}
+            >
               <span className="shortcut-label">
                 {shortcut.label}
                 <small>{shortcut.category}</small>
               </span>
               <span className="shortcut-keys">
-                {shortcut.keys.map((key) => <kbd key={key}>{key}</kbd>)}
+                {shortcut.keys.map((key) =>
+                  key === "or" ? <small key={key}>or</small> : <kbd key={key}>{key}</kbd>,
+                )}
               </span>
-            </div>
+            </button>
           ))}
           {!matches.length && <p className="shortcut-empty">No shortcuts found.</p>}
         </div>
-        <p className="shortcut-note">Shortcuts are paused while you type in a field.</p>
+        <p className="shortcut-note"><kbd>↑</kbd><kbd>↓</kbd> Navigate · <kbd>Enter</kbd> Run · <kbd>Esc</kbd> Close</p>
       </section>
     </div>
   );
@@ -2301,6 +2334,66 @@ function Review({
     }));
   }
 
+  function runCommand(command: Command) {
+    if (command === "palette") setShowShortcuts(true);
+    else if (command === "find-viewed-file") openTextSearch();
+    else if (command === "find-file") setShowFinder(true);
+    else if (command === "search-files") {
+      setShowFiles(true);
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLInputElement>('[aria-label="Find a file"]')?.focus(),
+      );
+    } else if (command === "next-file") moveFile(1);
+    else if (command === "previous-file") moveFile(-1);
+    else if (command === "review-palette") setReviewPickerRequest((value) => value + 1);
+    else if (command === "file-browser") {
+      viewerFocusRequest.current = interactionVersion.current;
+      changeTab("files");
+    } else if (command === "uncommitted") {
+      changeTab("changes", false);
+      void compare("working");
+    } else if (command === "recent-commit") {
+      if (latestCommitPending.current) return;
+      latestCommitPending.current = true;
+      const refresh = ++viewRefresh.current;
+      setContentRevision(refresh);
+      void refreshInfo()
+        .then(async (nextInfo) => {
+          if (refresh !== viewRefresh.current) return;
+          const latest = nextInfo.commits[0]?.id;
+          if (!latest) return;
+          setTo(latest);
+          changeTab("changes", false);
+          await compare("commit", latest, from, false, nextInfo, refresh);
+        })
+        .catch((error) => setError((error as Error).message))
+        .finally(() => {
+          latestCommitPending.current = false;
+        });
+    } else if (command === "comment" && content && !notice && (diffView || fileSource)) {
+      setLineTarget(range ? `${start}${end !== start ? `-${end}` : ""}` : "");
+      setLineSide(singleSide || (range?.side === "deletions" ? "deletions" : "additions"));
+      setLineError("");
+      setShowLinePicker(true);
+    } else if (command === "toggle-reviewed") toggleReviewed();
+    else if (command === "undo") undo();
+    else if (command === "save-comment") saveComment();
+    else if (command === "copy-prompt" && comments.length) void copyPrompt();
+    else if (command === "preview-prompt" && comments.length) setShowPrompt(true);
+    else if (command === "toggle-diff" && diffView) setSplit((value) => !value);
+    else if (command === "toggle-wrap") setWrap((value) => !value);
+    else if (command === "toggle-files") setShowFiles((value) => !value);
+    else if (command === "toggle-comments") setShowComments((value) => !value);
+    else if (command === "expand-diff" && fileDiff) setExpandedDiff(contentKey);
+    else if (command === "collapse-diff" && fileDiff) setExpandedDiff("");
+    else if (command === "refresh") location.reload();
+    else if (command === "cancel") {
+      setEditing(undefined);
+      setRange(null);
+      setDraft("");
+    }
+  }
+
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -2314,6 +2407,11 @@ function Review({
       ) {
         event.preventDefault();
         openTextSearch();
+        return;
+      }
+      if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setShowShortcuts(true);
         return;
       }
 
@@ -2345,32 +2443,8 @@ function Review({
         window.clearTimeout(keySequenceTimer.current);
         if (["f", "c", "u", "r"].includes(key)) {
           event.preventDefault();
-          if (key === "r") setReviewPickerRequest((value) => value + 1);
-          else if (key === "f") {
-            viewerFocusRequest.current = interactionVersion.current;
-            changeTab("files");
-          } else if (key === "u") {
-            changeTab("changes", false);
-            void compare("working");
-          } else {
-            if (latestCommitPending.current) return;
-            latestCommitPending.current = true;
-            const refresh = ++viewRefresh.current;
-            setContentRevision(refresh);
-            void refreshInfo()
-              .then(async (nextInfo) => {
-                if (refresh !== viewRefresh.current) return;
-                const latest = nextInfo.commits[0]?.id;
-                if (!latest) return;
-                setTo(latest);
-                changeTab("changes", false);
-                await compare("commit", latest, from, false, nextInfo, refresh);
-              })
-              .catch((error) => setError((error as Error).message))
-              .finally(() => {
-                latestCommitPending.current = false;
-              });
-          }
+          runCommand(key === "r" ? "review-palette" : key === "f" ? "file-browser"
+            : key === "u" ? "uncommitted" : "recent-commit");
         }
         return;
       }
@@ -2386,31 +2460,16 @@ function Review({
       const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "w", "b", "m", "e", "c"];
       if (!handled.includes(key)) return;
       event.preventDefault();
-      if (key === "?") setShowShortcuts(true);
-      else if (key === "f") setShowFinder(true);
-      else if (key === "/") {
-        setShowFiles(true);
-        requestAnimationFrame(() =>
-          document.querySelector<HTMLInputElement>('[aria-label="Find a file"]')?.focus(),
-        );
-      } else if (key === "j") moveFile(1);
-      else if (key === "k") moveFile(-1);
-      else if (key === "l" && content && !notice && (diffView || fileSource)) {
-        setLineTarget(range ? `${start}${end !== start ? `-${end}` : ""}` : "");
-        setLineSide(singleSide || (range?.side === "deletions" ? "deletions" : "additions"));
-        setLineError("");
-        setShowLinePicker(true);
-      } else if (key === "r" && event.shiftKey) location.reload();
-      else if (key === "r") toggleReviewed();
-      else if (key === "u") undo();
-      else if (key === "y" && comments.length) void copyPrompt();
-      else if (key === "p" && comments.length) setShowPrompt(true);
-      else if (key === "v" && diffView) setSplit((value) => !value);
-      else if (key === "w") setWrap((value) => !value);
-      else if (key === "b") setShowFiles((value) => !value);
-      else if (key === "m") setShowComments((value) => !value);
-      else if (key === "e" && fileDiff) setExpandedDiff(contentKey);
-      else if (key === "c" && fileDiff) setExpandedDiff("");
+      const command: Command = key === "?" ? "palette" : key === "f" ? "find-file"
+        : key === "/" ? "search-files" : key === "j" ? "next-file"
+          : key === "k" ? "previous-file" : key === "l" ? "comment"
+            : key === "r" && event.shiftKey ? "refresh" : key === "r" ? "toggle-reviewed"
+              : key === "u" ? "undo" : key === "y" ? "copy-prompt"
+                : key === "p" ? "preview-prompt" : key === "v" ? "toggle-diff"
+                  : key === "w" ? "toggle-wrap" : key === "b" ? "toggle-files"
+                    : key === "m" ? "toggle-comments" : key === "e" ? "expand-diff"
+                      : "collapse-diff";
+      runCommand(command);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -2479,8 +2538,8 @@ function Review({
           </button>
           <button
             className="shortcut-trigger"
-            aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts (?)"
+            aria-label="Command launcher"
+            title="Command launcher (? or Cmd+K)"
             onClick={() => setShowShortcuts(true)}
           >
             ?
@@ -3249,7 +3308,15 @@ function Review({
           onClose={() => setShowFinder(false)}
         />
       )}
-      {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)} />}
+      {showShortcuts && (
+        <ShortcutHelp
+          onClose={() => setShowShortcuts(false)}
+          onChoose={(command) => {
+            setShowShortcuts(false);
+            runCommand(command);
+          }}
+        />
+      )}
       {showLinePicker && (
         <div className="modal-backdrop" onClick={() => setShowLinePicker(false)}>
           <form
