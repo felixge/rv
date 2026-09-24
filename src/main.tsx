@@ -201,7 +201,8 @@ type Shortcut = {
   category: "Navigate" | "Review" | "View" | "General";
 };
 type Command =
-  | "palette" | "find-viewed-file" | "find-file" | "search-files" | "next-file" | "previous-file"
+  | "palette" | "find-viewed-file" | "next-text-match" | "previous-text-match"
+  | "find-file" | "search-files" | "next-file" | "previous-file"
   | "file-browser" | "recent-commit" | "uncommitted" | "review-palette"
   | "comment" | "toggle-reviewed" | "undo" | "save-comment" | "copy-prompt"
   | "preview-prompt" | "toggle-diff" | "toggle-wrap" | "toggle-files"
@@ -209,6 +210,8 @@ type Command =
 const shortcuts: Shortcut[] = [
   { command: "palette", keys: ["?", "or", "⌘", "K"], label: "Open command launcher", category: "General" },
   { command: "find-viewed-file", keys: ["⌘/Ctrl", "F"], label: "Find in viewed file", category: "Navigate" },
+  { command: "next-text-match", keys: ["⌘/Ctrl", "G"], label: "Find next match", category: "Navigate" },
+  { command: "previous-text-match", keys: ["⌘/Ctrl", "Shift", "G"], label: "Find previous match", category: "Navigate" },
   { command: "find-file", keys: ["F"], label: "Find a file", category: "Navigate" },
   { command: "search-files", keys: ["/"], label: "Search files", category: "Navigate" },
   { command: "next-file", keys: ["J"], label: "Next file", category: "Navigate" },
@@ -2107,6 +2110,15 @@ function Review({
       textSearchInput.current?.select();
     });
   };
+  const findTextMatch = (offset: number) => {
+    if (!textSearch) {
+      openTextSearch();
+      return;
+    }
+    setHighlightSelectedText(false);
+    setShowTextSearch(true);
+    moveTextMatch(offset);
+  };
   const annotations = comments.filter(matchesView).map((comment) => ({
     lineNumber: comment.end,
     side:
@@ -2537,6 +2549,8 @@ function Review({
   function runCommand(command: Command) {
     if (command === "palette") setShowShortcuts(true);
     else if (command === "find-viewed-file") openTextSearch();
+    else if (command === "next-text-match") findTextMatch(1);
+    else if (command === "previous-text-match") findTextMatch(-1);
     else if (command === "find-file") setShowFinder(true);
     else if (command === "search-files") {
       setShowFiles(true);
@@ -2607,6 +2621,15 @@ function Review({
       ) {
         event.preventDefault();
         openTextSearch();
+        return;
+      }
+      if (
+        event.key.toLowerCase() === "g" &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        findTextMatch(event.shiftKey ? -1 : 1);
         return;
       }
       if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k") {

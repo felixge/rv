@@ -1923,13 +1923,17 @@ try {
   const otherOccurrences = await otherSearchHighlights();
   assert.deepEqual(otherOccurrences.map(({ text }) => text), ["const distantSearchTarget"]);
   assert.notEqual(otherOccurrences[0].left, firstOccurrence.left);
-  await browser("press", "Enter");
+  await browser("press", "Meta+g");
   await wait("document.querySelector('.text-search span')?.textContent === '2/4'");
   await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
   const secondOccurrence = await activeSearchHighlight();
   assert.equal(secondOccurrence.line, 420);
   assert.equal(secondOccurrence.text, "const distantSearchTarget");
   assert.notEqual(secondOccurrence.left, firstOccurrence.left);
+  await browser("press", "Meta+Shift+g");
+  await wait("document.querySelector('.text-search span')?.textContent === '1/4'");
+  await browser("press", "Control+g");
+  await wait("document.querySelector('.text-search span')?.textContent === '2/4'");
   await browser("press", "Enter");
   await wait("document.querySelector('.text-search span')?.textContent === '3/4'");
   await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.toString() === 'const distantSearchTarget' && Array.from(CSS.highlights.get('rv-text-search'))[0].startContainer.isConnected");
@@ -1956,7 +1960,7 @@ try {
   assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
   assert.equal(await evaluate("CSS.highlights.has('rv-text-search')"), false);
   assert.equal(await evaluate("CSS.highlights.has('rv-text-search-matches')"), false);
-  console.log("PASS Cmd/Ctrl+F highlights all visible occurrences, emphasizes the active match, spans tokens, and navigates virtualized lines");
+  console.log("PASS Cmd/Ctrl+F highlights occurrences; Cmd/Ctrl+G navigates forward, Shift reverses, and matches span tokens and virtualized lines");
 
   // Diffs can use the same line number on both sides. Preserve the source
   // match's side when locating its rendered range.
