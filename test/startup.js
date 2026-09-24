@@ -95,6 +95,46 @@ try {
     assert.ok(sample.highlighted < 900, "Warm highlighted diff must appear within 900 ms");
   }
   console.log("PASS cold, warm and reload startup budgets, with syntax-highlighted diff");
+
+  // Inspect a real background target over CDP without activating it. Browser
+  // automation normally focuses a tab before assertions, which would hide a
+  // regression where startup work waits for visibility.
+  const { targetId } = await cdp("Target.createTarget", {
+    url: `http://127.0.0.1:${server.address().port}/?mode=files&path=src%2Fdiscount.ts`,
+    background: true,
+  });
+  const backgroundAttachment = await cdp("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  const background = (method, params) =>
+    cdp(method, params, backgroundAttachment.sessionId);
+  await background("Runtime.enable");
+  let backgroundResult;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const { result } = await background("Runtime.evaluate", {
+      expression: `({
+        hidden: document.hidden,
+        loading: document.querySelector('.empty')?.textContent === 'Loading…',
+        path: document.querySelector('.file-path')?.textContent,
+        highlighted: Boolean(document.querySelector('diffs-container')
+          ?.shadowRoot?.querySelector('pre span[style]')),
+      })`,
+      returnByValue: true,
+    });
+    backgroundResult = result.value;
+    if (backgroundResult.path === "src/discount.ts" &&
+        !backgroundResult.loading && backgroundResult.highlighted) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.deepEqual(backgroundResult, {
+    hidden: true,
+    loading: false,
+    path: "src/discount.ts",
+    highlighted: true,
+  });
+  await cdp("Target.closeTarget", { targetId });
+  console.log("PASS a hidden background tab loads and highlights its requested file");
 } catch (error) {
   console.error(await evaluate(`({ startup: window.startup, text: document.body.innerText,
     code: document.querySelector('diffs-container')?.shadowRoot?.innerHTML.slice(-4000) })`));
