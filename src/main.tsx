@@ -67,6 +67,7 @@ type TextSearchMatch = {
   side?: "additions" | "deletions";
 };
 const textSearchHighlightName = "rv-text-search";
+const textSearchMatchesHighlightName = "rv-text-search-matches";
 // The server-side disk cache, loaded once and saved back debounced.
 type SavedState = {
   view?: Record<string, unknown>;
@@ -1898,32 +1899,37 @@ function Review({
   }, [showTextSearch, currentTextMatch, selected]);
   useEffect(() => {
     CSS.highlights.delete(textSearchHighlightName);
+    CSS.highlights.delete(textSearchMatchesHighlightName);
     if (!showTextSearch || !currentTextMatch || !viewerContainer.current) return;
     const host = viewerContainer.current.querySelector("diffs-container");
     const shadow = host?.shadowRoot;
     if (!shadow) return;
     const style = document.createElement("style");
-    style.textContent = `::highlight(${textSearchHighlightName}) {
+    style.textContent = `::highlight(${textSearchMatchesHighlightName}) {
+      color: inherit;
+      background: rgba(147, 157, 171, 0.35);
+    }
+    ::highlight(${textSearchHighlightName}) {
       color: inherit;
       background: #ffd75e;
     }`;
     shadow.append(style);
 
-    const applyHighlight = () => {
-      CSS.highlights.delete(textSearchHighlightName);
-      const side = currentTextMatch.side;
-      const lines = shadow.querySelectorAll<HTMLElement>(
-        `[data-line="${currentTextMatch.line}"]`,
-      );
+    const rangeForMatch = (
+      match: TextSearchMatch,
+      renderedLines: Map<number, HTMLElement[]>,
+    ) => {
+      const side = match.side;
+      const lines = renderedLines.get(match.line) || [];
       const line = !side
         ? lines[0]
-        : Array.from(lines).find((candidate) =>
+        : lines.find((candidate) =>
             candidate.closest(`[data-${side}]`) ||
             candidate.dataset.lineType?.includes(
               side === "deletions" ? "deletion" : "addition",
             )
           );
-      if (!line) return false;
+      if (!line) return null;
       const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
       let offset = 0;
       let startNode: Text | null = null;
@@ -1933,30 +1939,55 @@ function Review({
       while (walker.nextNode()) {
         const node = walker.currentNode as Text;
         const nextOffset = offset + node.data.length;
-        if (!startNode && currentTextMatch.start < nextOffset) {
+        if (!startNode && match.start < nextOffset) {
           startNode = node;
-          startOffset = currentTextMatch.start - offset;
+          startOffset = match.start - offset;
         }
-        if (currentTextMatch.end <= nextOffset) {
+        if (match.end <= nextOffset) {
           endNode = node;
-          endOffset = currentTextMatch.end - offset;
+          endOffset = match.end - offset;
           break;
         }
         offset = nextOffset;
       }
-      if (!startNode || !endNode) return false;
+      if (!startNode || !endNode) return null;
       const range = new Range();
       range.setStart(startNode, startOffset);
       range.setEnd(endNode, endOffset);
-      CSS.highlights.set(textSearchHighlightName, new Highlight(range));
+      return range;
+    };
+
+    const applyHighlights = () => {
+      CSS.highlights.delete(textSearchHighlightName);
+      CSS.highlights.delete(textSearchMatchesHighlightName);
+      const renderedLines = new Map<number, HTMLElement[]>();
+      for (const line of shadow.querySelectorAll<HTMLElement>("[data-line]")) {
+        const number = Number(line.dataset.line);
+        const candidates = renderedLines.get(number) || [];
+        candidates.push(line);
+        renderedLines.set(number, candidates);
+      }
+      const otherRanges = textMatches
+        .filter((match) => match !== currentTextMatch)
+        .map((match) => rangeForMatch(match, renderedLines))
+        .filter((range): range is Range => range !== null);
+      if (otherRanges.length) {
+        CSS.highlights.set(
+          textSearchMatchesHighlightName,
+          new Highlight(...otherRanges),
+        );
+      }
+      const activeRange = rangeForMatch(currentTextMatch, renderedLines);
+      if (!activeRange) return false;
+      CSS.highlights.set(textSearchHighlightName, new Highlight(activeRange));
       return true;
     };
 
-    applyHighlight();
+    applyHighlights();
     // CodeView first mounts plain text and later replaces it with highlighted
     // token nodes. It also replaces lines as they enter and leave the virtual
     // window, so rebuild the Range after either kind of DOM change.
-    const observer = new MutationObserver(applyHighlight);
+    const observer = new MutationObserver(applyHighlights);
     observer.observe(shadow, {
       attributes: true,
       characterData: true,
@@ -1966,9 +1997,10 @@ function Review({
     return () => {
       observer.disconnect();
       CSS.highlights.delete(textSearchHighlightName);
+      CSS.highlights.delete(textSearchMatchesHighlightName);
       style.remove();
     };
-  }, [showTextSearch, currentTextMatch, contentKey, viewerMode]);
+  }, [showTextSearch, textMatches, currentTextMatch, contentKey, viewerMode]);
   const moveTextMatch = (offset: number) => {
     if (!textMatches.length) return;
     setActiveTextMatch((current) =>

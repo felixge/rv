@@ -161,6 +161,10 @@ async function activeSearchHighlight() {
   }
   assert.fail("Expected one connected occurrence search highlight");
 }
+const otherSearchHighlights = () =>
+  evaluate(`Array.from(CSS.highlights.get('rv-text-search-matches') || [])
+    .filter(range => range.startContainer.isConnected)
+    .map(range => ({ text: range.toString(), left: Math.round(range.getBoundingClientRect().left) }))`);
 async function expectHintAfter(number, text) {
   assert.equal(
     await evaluate(`(() => {
@@ -1847,6 +1851,9 @@ try {
     { text: firstOccurrence.text, line: firstOccurrence.line },
     { text: "const distantSearchTarget", line: 420 },
   );
+  const otherOccurrences = await otherSearchHighlights();
+  assert.deepEqual(otherOccurrences.map(({ text }) => text), ["const distantSearchTarget"]);
+  assert.notEqual(otherOccurrences[0].left, firstOccurrence.left);
   await browser("press", "Enter");
   await wait("document.querySelector('.text-search span')?.textContent === '2/4'");
   await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
@@ -1879,7 +1886,8 @@ try {
   await browser("press", "Escape");
   assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
   assert.equal(await evaluate("CSS.highlights.has('rv-text-search')"), false);
-  console.log("PASS Cmd/Ctrl+F counts same-line occurrences, highlights token-spanning ranges, and navigates virtualized lines");
+  assert.equal(await evaluate("CSS.highlights.has('rv-text-search-matches')"), false);
+  console.log("PASS Cmd/Ctrl+F highlights all visible occurrences, emphasizes the active match, spans tokens, and navigates virtualized lines");
 
   // Diffs can use the same line number on both sides. Preserve the source
   // match's side when locating its rendered range.
@@ -1896,6 +1904,7 @@ try {
   await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
   await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
   assert.equal((await activeSearchHighlight()).side, "deletions");
+  assert.deepEqual((await otherSearchHighlights()).map(({ text }) => text), ["sideTarget"]);
   await browser("press", "Enter");
   await wait("document.querySelector('.text-search span')?.textContent === '2/2'");
   await wait("Array.from(CSS.highlights.get('rv-text-search') || [])[0]?.startContainer.isConnected");
