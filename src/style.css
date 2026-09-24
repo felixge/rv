@@ -728,11 +728,13 @@ button.panel-toggle:hover {
   gap: 8px;
   margin-left: auto;
 }
-.wrap-toggle {
+.wrap-toggle,
+.expand-all {
   font-size: 10px;
   padding: 5px 8px;
 }
-.wrap-toggle[aria-pressed="true"] {
+.wrap-toggle[aria-pressed="true"],
+.expand-all[aria-pressed="true"] {
   color: #125eaa;
   background: #eaf2fc;
   border-color: #b8d1ec;

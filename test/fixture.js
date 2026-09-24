@@ -16,6 +16,12 @@ export async function fixture() {
     await mkdir(path.dirname(path.join(root, name)), { recursive: true });
     await writeFile(path.join(root, name), contents);
   };
+  const shippingFooter =
+    "\n// Prices are denominated in euros.\n" +
+    "// Tax is applied after selecting the base rate.\n" +
+    "// Country codes use ISO 3166-1 alpha-2.\n" +
+    "// Threshold comparisons include the boundary.\n" +
+    "// Callers are responsible for validating orders.\n";
   git("init", "-q", "-b", "main");
   git("config", "user.name", "Rv Test");
   git("config", "user.email", "test@example.invalid");
@@ -27,7 +33,7 @@ export async function fixture() {
   );
   await write(
     "src/shipping.ts",
-    "export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nexport function shippingCost(order: Order): number {\n  const baseRate = 5;\n  return baseRate;\n}\n",
+    "export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nexport function shippingCost(order: Order): number {\n  const baseRate = 5;\n  return baseRate;\n}\n" + shippingFooter,
   );
   await write("src/legacy.ts", "export const freeShipping = false;\n");
   git("add", ".");
@@ -35,7 +41,7 @@ export async function fixture() {
   const first = git("rev-parse", "HEAD");
   await write(
     "src/shipping.ts",
-    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nexport function shippingCost(order: Order): number {\n  const baseRate = order.country === "DE" ? 5 : 12;\n  return baseRate;\n}\n',
+    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nexport function shippingCost(order: Order): number {\n  const baseRate = order.country === "DE" ? 5 : 12;\n  return baseRate;\n}\n' + shippingFooter,
   );
   await write(
     "test/shipping.test.ts",
@@ -54,19 +60,19 @@ export async function fixture() {
   const second = git("rev-parse", "HEAD");
   await write(
     "src/shipping.ts",
-    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nconst FREE_SHIPPING_THRESHOLD = 100;\n\nexport function shippingCost(order: Order): number {\n  if (order.subtotal >= FREE_SHIPPING_THRESHOLD) {\n    return 0;\n  }\n\n  const baseRate = order.country === "DE" ? 5 : 12;\n  return baseRate;\n}\n',
+    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nconst FREE_SHIPPING_THRESHOLD = 100;\n\nexport function shippingCost(order: Order): number {\n  if (order.subtotal >= FREE_SHIPPING_THRESHOLD) {\n    return 0;\n  }\n\n  const baseRate = order.country === "DE" ? 5 : 12;\n  return baseRate;\n}\n' + shippingFooter,
   );
   git("add", "src/shipping.ts");
   git("commit", "-qm", "Introduce free shipping threshold", "--date", dates[2]);
   const third = git("rev-parse", "HEAD");
   await write(
     "src/shipping.ts",
-    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nconst FREE_SHIPPING_THRESHOLD = 75;\n\nexport function shippingCost(order: Order): number {\n  if (order.subtotal >= FREE_SHIPPING_THRESHOLD) {\n    return 0;\n  }\n\n  const baseRate = order.country === "DE" ? 5 : 12;\n  return Math.round(baseRate * 1.19);\n}\n',
+    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nconst FREE_SHIPPING_THRESHOLD = 75;\n\nexport function shippingCost(order: Order): number {\n  if (order.subtotal >= FREE_SHIPPING_THRESHOLD) {\n    return 0;\n  }\n\n  const baseRate = order.country === "DE" ? 5 : 12;\n  return Math.round(baseRate * 1.19);\n}\n' + shippingFooter,
   );
   git("add", "src/shipping.ts");
   await write(
     "src/shipping.ts",
-    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nconst FREE_SHIPPING_THRESHOLD = 75;\n\nexport function shippingCost(order: Order): number {\n  if (order.subtotal >= FREE_SHIPPING_THRESHOLD) {\n    return 0;\n  }\n\n  const baseRate = order.country === "DE" ? 6 : 14;\n  return Math.round(baseRate * 1.19);\n}\n',
+    'export interface Order {\n  subtotal: number;\n  country: string;\n}\n\nconst FREE_SHIPPING_THRESHOLD = 75;\n\nexport function shippingCost(order: Order): number {\n  if (order.subtotal >= FREE_SHIPPING_THRESHOLD) {\n    return 0;\n  }\n\n  const baseRate = order.country === "DE" ? 6 : 14;\n  return Math.round(baseRate * 1.19);\n}\n' + shippingFooter,
   );
   await rm(path.join(root, "src/legacy.ts"));
   await write(

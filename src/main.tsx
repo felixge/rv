@@ -1238,6 +1238,7 @@ function Review({
   const [loading, setLoading] = useState(false);
   const [split, setSplit] = useState(saved.split);
   const [wrap, setWrap] = useState(saved.wrap);
+  const [expandedDiff, setExpandedDiff] = useState("");
   const [range, setRange] = useState<SelectedLineRange | null>(null);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState<string>();
@@ -1520,9 +1521,10 @@ function Review({
       itemMetrics: { lineHeight: 23 },
       pointerEventsOnScroll: true,
       overflow: wrap ? ("wrap" as const) : ("scroll" as const),
+      expandUnchanged: expandedDiff === contentKey,
       disableFileHeader: true,
     }),
-    [split, wrap, onSelection],
+    [split, wrap, expandedDiff, contentKey, onSelection],
   );
   const prompt = formatPrompt(comments);
   const notice = content?.newFile?.notice || content?.oldFile?.notice;
@@ -2336,6 +2338,24 @@ function Review({
                     Split
                   </button>
                 </div>
+              )}
+              {fileDiff && (
+                <button
+                  className="expand-all"
+                  aria-pressed={expandedDiff === contentKey}
+                  title={
+                    expandedDiff === contentKey
+                      ? "Collapse unchanged lines"
+                      : "Expand all hidden lines"
+                  }
+                  onClick={() =>
+                    setExpandedDiff(
+                      expandedDiff === contentKey ? "" : contentKey,
+                    )
+                  }
+                >
+                  {expandedDiff === contentKey ? "Collapse all" : "Expand all"}
+                </button>
               )}
               <button
                 className="wrap-toggle"

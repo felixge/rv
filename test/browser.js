@@ -241,7 +241,7 @@ try {
   await wait("document.activeElement.getAttribute('aria-label') === 'Search review scopes'");
   await browser("press", "Escape");
   await wait("!document.querySelector('.review-popover')");
-  assert.equal(await lineStats(), "27 total lines of code");
+  assert.equal(await lineStats(), "33 total lines of code");
   assert.equal(
     await evaluate(
       "document.querySelector('.topbar [aria-controls=\"file-browser\"]')",
@@ -350,6 +350,21 @@ try {
   await browser("press", "g");
   await browser("press", "u");
   await wait("document.querySelector('[aria-label=\"Review scope\"]').textContent.includes('Uncommitted changes')");
+  await tree("shipping.ts");
+  await wait(`${shadow}?.querySelector('[data-unmodified-lines]')`);
+  await click("Expand all");
+  await wait(`!${shadow}.querySelector('[data-unmodified-lines]')`);
+  assert.equal(
+    await evaluate("document.querySelector('.expand-all').getAttribute('aria-pressed')"),
+    "true",
+  );
+  await click("Collapse all");
+  await wait(`${shadow}.querySelector('[data-unmodified-lines]')`);
+  assert.equal(
+    await evaluate("document.querySelector('.expand-all').getAttribute('aria-pressed')"),
+    "false",
+  );
+  console.log("PASS file diff expands and collapses all hidden lines");
   await browser("press", "v");
   assert.equal(
     await evaluate("document.querySelector('.segmented button:last-child').getAttribute('aria-pressed')"),
