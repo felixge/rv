@@ -123,7 +123,9 @@ const shortcuts: Shortcut[] = [
   { keys: ["V"], label: "Toggle unified / split diff", category: "View" },
   { keys: ["W"], label: "Toggle long line wrapping", category: "View" },
   { keys: ["B"], label: "Toggle file browser", category: "View" },
-  { keys: ["C"], label: "Toggle comments", category: "View" },
+  { keys: ["M"], label: "Toggle comments", category: "View" },
+  { keys: ["E"], label: "Expand viewed file diff", category: "View" },
+  { keys: ["C"], label: "Collapse viewed file diff", category: "View" },
   { keys: ["Shift", "R"], label: "Refresh repository", category: "General" },
   { keys: ["Esc"], label: "Close or cancel", category: "General" },
 ];
@@ -2230,7 +2232,7 @@ function Review({
         return;
       }
 
-      const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "w", "b", "c"];
+      const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "w", "b", "m", "e", "c"];
       if (!handled.includes(key)) return;
       event.preventDefault();
       if (key === "?") setShowShortcuts(true);
@@ -2255,7 +2257,9 @@ function Review({
       else if (key === "v" && diffView) setSplit((value) => !value);
       else if (key === "w") setWrap((value) => !value);
       else if (key === "b") setShowFiles((value) => !value);
-      else if (key === "c") setShowComments((value) => !value);
+      else if (key === "m") setShowComments((value) => !value);
+      else if (key === "e" && fileDiff) setExpandedDiff(contentKey);
+      else if (key === "c" && fileDiff) setExpandedDiff("");
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -2611,8 +2615,8 @@ function Review({
                   aria-pressed={expandedDiff === contentKey}
                   title={
                     expandedDiff === contentKey
-                      ? "Collapse unchanged lines"
-                      : "Expand all hidden lines"
+                      ? "Collapse unchanged lines (C)"
+                      : "Expand all hidden lines (E)"
                   }
                   onClick={() =>
                     setExpandedDiff(
@@ -2787,7 +2791,7 @@ function Review({
             <button
               className="panel-toggle"
               aria-label="Hide comments"
-              title="Hide comments"
+              title="Hide comments (M)"
               aria-controls="review-comments"
               onClick={() => setShowComments(false)}
             >
@@ -2987,7 +2991,7 @@ function Review({
           <button
             className="panel-toggle"
             aria-label="Show comments"
-            title="Show comments"
+            title="Show comments (M)"
             aria-controls="review-comments"
             onClick={() => setShowComments(true)}
           >

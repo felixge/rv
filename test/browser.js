@@ -527,28 +527,29 @@ try {
   assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), true);
   await browser("press", "b");
   assert.equal(await evaluate("document.querySelector('#file-browser').hidden"), false);
-  await browser("press", "c");
+  await browser("press", "m");
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), true);
-  await browser("press", "c");
+  await browser("press", "m");
   assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
   await browser("press", "g");
   await browser("press", "u");
   await wait("document.querySelector('[aria-label=\"Review scope\"]').textContent.includes('Uncommitted changes')");
   await tree("shipping.ts");
   await wait(`${shadow}?.querySelector('[data-unmodified-lines]')`);
-  await click("Expand all");
+  await browser("press", "e");
   await wait(`!${shadow}.querySelector('[data-unmodified-lines]')`);
   assert.equal(
     await evaluate("document.querySelector('.expand-all').getAttribute('aria-pressed')"),
     "true",
   );
-  await click("Collapse all");
+  await browser("press", "c");
   await wait(`${shadow}.querySelector('[data-unmodified-lines]')`);
   assert.equal(
     await evaluate("document.querySelector('.expand-all').getAttribute('aria-pressed')"),
     "false",
   );
-  console.log("PASS file diff expands and collapses all hidden lines");
+  assert.equal(await evaluate("document.querySelector('#review-comments').hidden"), false);
+  console.log("PASS E/C expand and collapse the viewed file diff; M toggles comments");
   await browser("press", "v");
   assert.equal(
     await evaluate("document.querySelector('.segmented button:last-child').getAttribute('aria-pressed')"),
