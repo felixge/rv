@@ -343,7 +343,7 @@ try {
     await wait(`${shadow}?.querySelector('pre')`);
     assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), mode);
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-current')`), "true");
-    assert.equal(await evaluate("new URLSearchParams(location.search).get('to')"), f.second);
+    assert.equal(await evaluate("new URLSearchParams(location.search).get('to')"), "HEAD~1");
     assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
     await browser("tab", "close", modeTab.tabId);
     await browser("tab", originalTab);
@@ -363,7 +363,7 @@ try {
     assert.equal(await evaluate("Boolean(document.querySelector('[aria-label=\"Diff layout\"]'))"), false);
     const href = await evaluate("document.querySelector('a.file-path').href");
     assert.equal(new URL(href).searchParams.get("view"), mode);
-    assert.equal(new URL(href).searchParams.get("to"), f.second);
+    assert.equal(new URL(href).searchParams.get("to"), "HEAD~1");
     await browser("click", "a.file-path", "--new-tab");
     const sideTab = (await browser("tab", "list")).tabs.find((tab) => tab.tabId !== originalTab);
     await browser("tab", sideTab.tabId);

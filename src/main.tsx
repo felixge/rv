@@ -557,16 +557,23 @@ function viewHref(
   viewerMode: ViewerMode,
   split: boolean,
   expanded: boolean,
+  commits: Info["commits"],
 ) {
   const url = new URL(location.href);
   for (const key of ["mode", "from", "to", "path", "view", "split", "expanded"])
     url.searchParams.delete(key);
-  url.searchParams.set("mode", tab === "files" ? "files" : !comparison.target
-    ? "working" : comparison.message !== undefined ? "commit" : "range");
+  const mode = tab === "files" ? "files" : !comparison.target
+    ? "working" : comparison.message !== undefined ? "commit" : "range";
+  url.searchParams.set("mode", mode);
   if (tab === "changes") url.searchParams.set("view", viewerMode);
   if (tab === "changes" && comparison.target) {
     if (comparison.message === undefined) url.searchParams.set("from", comparison.base);
-    url.searchParams.set("to", comparison.target);
+    const recent = mode === "commit"
+      ? commits.findIndex((commit) => commit.id === comparison.target)
+      : -1;
+    url.searchParams.set("to", recent < 0
+      ? comparison.target
+      : recent === 0 ? "HEAD" : `HEAD~${recent}`);
   }
   if (path) url.searchParams.set("path", path);
   if (split) url.searchParams.set("split", "true");
@@ -1566,18 +1573,26 @@ function Review({
       );
   }, []);
   const fileHref = (path: string) =>
-    viewHref(tab, comparison, path, viewerMode, split, expanded);
+    viewHref(tab, comparison, path, viewerMode, split, expanded, info.commits);
   const initialURL = useRef(true);
   useEffect(() => {
     if (restoring || comparing || error) return;
-    const href = viewHref(tab, comparison, selected, viewerMode, split, expanded);
+    const href = viewHref(
+      tab,
+      comparison,
+      selected,
+      viewerMode,
+      split,
+      expanded,
+      info.commits,
+    );
     if (initialURL.current) {
       history.replaceState(null, "", href);
       initialURL.current = false;
     } else if (href !== `${location.pathname}${location.search}${location.hash}`) {
       history.pushState(null, "", href);
     }
-  }, [restoring, comparing, error, tab, comparison, selected, viewerMode, split, expanded]);
+  }, [restoring, comparing, error, tab, comparison, selected, viewerMode, split, expanded, info.commits]);
   useEffect(() => {
     // Back/Forward use the same loading path as a direct link or new tab.
     const restoreURL = () => location.reload();
@@ -1793,6 +1808,7 @@ function Review({
             });
       if (id !== comparisonRequest.current) return;
       setComparison(result);
+      if (nextMode === "commit") setTo(result.target);
       setSelected((current) =>
         restore && (tab === "files" ||
           result.entries.some((entry) => entry.path === current))
@@ -3120,7 +3136,7 @@ function Review({
                   {(["diff", "old", "new"] as const).map((value) => (
                     <a
                       key={value}
-                      href={viewHref(tab, comparison, selected, value, split, expanded)}
+                      href={viewHref(tab, comparison, selected, value, split, expanded, info.commits)}
                       aria-label={`View ${value}`}
                       aria-current={viewerMode === value ? "true" : undefined}
                       onClick={(event) => {
@@ -3137,7 +3153,7 @@ function Review({
               {diffView && (
                 <div className="segmented" role="group" aria-label="Diff layout">
                   <a
-                    href={viewHref(tab, comparison, selected, viewerMode, false, expanded)}
+                    href={viewHref(tab, comparison, selected, viewerMode, false, expanded, info.commits)}
                     aria-current={!split ? "true" : undefined}
                     onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -3148,7 +3164,7 @@ function Review({
                     Unified
                   </a>
                   <a
-                    href={viewHref(tab, comparison, selected, viewerMode, true, expanded)}
+                    href={viewHref(tab, comparison, selected, viewerMode, true, expanded, info.commits)}
                     aria-current={split ? "true" : undefined}
                     onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -3163,7 +3179,7 @@ function Review({
               {fileDiff && (
                 <a
                   className="expand-all"
-                  href={viewHref(tab, comparison, selected, viewerMode, split, !expanded)}
+                  href={viewHref(tab, comparison, selected, viewerMode, split, !expanded, info.commits)}
                   aria-current={expanded ? "true" : undefined}
                   title={
                     expanded
