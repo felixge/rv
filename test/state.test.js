@@ -94,6 +94,19 @@ test("the state API round-trips browser state to disk", async (t) => {
   // The same state is on disk, so a restarted server serves it again.
   assert.deepEqual(await loadState(f.root), state);
 
+  // Preferences in one tab must not overwrite another tab's newer comments.
+  // Concurrent patches exercise the server's read/merge/write serialization.
+  const comments = [{ id: "c2", text: "New comment from another tab" }];
+  const view = { split: false, wrap: true };
+  const responses = await Promise.all([comments, view].map((value, index) =>
+    fetch(`${url}/api/state`, {
+      method: "PATCH", headers,
+      body: JSON.stringify(index === 0 ? { comments: value } : { view: value }),
+    }),
+  ));
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.deepEqual(await loadState(f.root), { ...state, comments, view });
+
   assert.equal((await fetch(`${url}/api/state`, { method: "DELETE", headers })).status, 200);
   assert.deepEqual(await (await fetch(`${url}/api/state`, { headers })).json(), {});
   assert.equal(await loadState(f.root), null);

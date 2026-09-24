@@ -38,6 +38,14 @@ const types = {
 };
 
 export function createApp(repo, { allowRemote = false } = {}) {
+  // Serialize read/merge/write operations so simultaneous tabs cannot lose
+  // unrelated sections (for example, preferences racing with a comment save).
+  let stateWrite = Promise.resolve();
+  const writeState = (operation) => {
+    const result = stateWrite.then(operation);
+    stateWrite = result.catch(() => {});
+    return result;
+  };
   return createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -68,7 +76,7 @@ export function createApp(repo, { allowRemote = false } = {}) {
           // served back so it survives restarts, ports and browsers.
           if (req.method === "GET")
             return send(200, (await loadState(repo.root)) || {});
-          if (req.method === "PUT") {
+          if (req.method === "PUT" || req.method === "PATCH") {
             const body = await readBody(req, MAX_STATE);
             if (body === null)
               return send(413, { error: "State exceeds the 1 MiB limit." });
@@ -80,11 +88,18 @@ export function createApp(repo, { allowRemote = false } = {}) {
             }
             if (!state || typeof state !== "object" || Array.isArray(state))
               return send(400, { error: "State must be a JSON object." });
-            await saveState(repo.root, state);
+            await writeState(async () => {
+              const next = req.method === "PATCH"
+                ? { ...await loadState(repo.root), ...state }
+                : state;
+              if (Buffer.byteLength(JSON.stringify(next)) > MAX_STATE)
+                throw new Error("State exceeds the 1 MiB limit.");
+              await saveState(repo.root, next);
+            });
             return send(200, { ok: true });
           }
           if (req.method === "DELETE") {
-            await clearState(repo.root);
+            await writeState(() => clearState(repo.root));
             return send(200, { ok: true });
           }
           return send(405, { error: "Unsupported method." });

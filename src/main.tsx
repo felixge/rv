@@ -59,6 +59,7 @@ type Comment = {
   commit?: string;
 };
 type Content = { oldFile: Source; newFile: Source };
+type ViewerMode = "diff" | "old" | "new";
 // The server-side disk cache, loaded once and saved back debounced.
 type SavedState = {
   view?: Record<string, unknown>;
@@ -163,11 +164,13 @@ function FileFinder({
   paths,
   reviewed,
   onSelect,
+  fileHref,
   onClose,
 }: {
   paths: string[];
   reviewed: string[];
   onSelect: (path: string) => void;
+  fileHref: (path: string) => string;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -231,19 +234,24 @@ function FileFinder({
           {matches.map((match, index) => {
             const done = reviewed.includes(match.path);
             return (
-              <button
+              <a
                 key={match.path}
+                href={fileHref(match.path)}
                 className={index === active ? "active" : ""}
                 role="option"
                 aria-selected={index === active}
                 onMouseEnter={() => setActive(index)}
-                onClick={() => choose(match.path)}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  choose(match.path);
+                }}
               >
                 <span className="finder-path">{match.path}</span>
                 <span className={`finder-state${done ? " reviewed" : ""}`}>
                   {done ? "✓ Reviewed" : "Unreviewed"}
                 </span>
-              </button>
+              </a>
             );
           })}
           {!matches.length && <p>No matching files.</p>}
@@ -335,31 +343,28 @@ function readView(info: Info, stored: unknown) {
   try {
     const view: any = stored || {};
     for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
+      // Navigation belongs to this tab's URL, not the shared disk cache.
+      if (["tab", "mode", "from", "to", "selected", "appliedMode", "base", "target"].includes(key)) continue;
       if (typeof view?.[key] !== typeof defaults[key]) continue;
       if (
         key === "collapsed" &&
         (!Array.isArray(view[key]) ||
           !view[key].every((path: unknown) => typeof path === "string"))
       ) continue;
-      if (key === "tab" && !["files", "changes"].includes(view[key])) continue;
-      if (
-        (key === "mode" || key === "appliedMode") &&
-        !["working", "commit", "range"].includes(view[key])
-      ) continue;
       Object.assign(defaults, { [key]: view[key] });
     }
   } catch {
     // Missing, obsolete or malformed saved state falls back to current defaults.
   }
-  // CLI options arrive as query params and override the saved view on first load.
+  // The same query parameters serve CLI entry points and in-app navigation.
   const params = new URLSearchParams(location.search);
   const urlMode = params.get("mode") || "";
   if (["working", "commit", "range"].includes(urlMode)) {
     Object.assign(defaults, {
       tab: "changes",
       mode: urlMode,
-      from: params.get("from") || "",
-      to: params.get("to") || "",
+      from: params.get("from") || defaults.from,
+      to: params.get("to") || defaults.to,
       // Match the in-app pickers, which always open on the first change.
       selected:
         urlMode === "working" ? info.working.entries[0]?.path || "" : "",
@@ -368,7 +373,24 @@ function readView(info: Info, stored: unknown) {
       target: params.get("to") || "",
     });
   }
-  return defaults;
+  if (params.has("path")) defaults.selected = params.get("path")!;
+  const view = params.get("view");
+  const viewerMode: ViewerMode = view === "old" || view === "new" ? view : "diff";
+  return { ...defaults, viewerMode };
+}
+
+function viewHref(tab: string, comparison: Comparison, path: string, viewerMode: ViewerMode) {
+  const url = new URL(location.href);
+  for (const key of ["mode", "from", "to", "path", "view"]) url.searchParams.delete(key);
+  url.searchParams.set("mode", tab === "files" ? "files" : !comparison.target
+    ? "working" : comparison.message !== undefined ? "commit" : "range");
+  if (tab === "changes") url.searchParams.set("view", viewerMode);
+  if (tab === "changes" && comparison.target) {
+    if (comparison.message === undefined) url.searchParams.set("from", comparison.base);
+    url.searchParams.set("to", comparison.target);
+  }
+  if (path) url.searchParams.set("path", path);
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 // Deliberately no polling, focus revalidation, websocket, or filesystem watcher.
@@ -472,6 +494,7 @@ function BrowserTree({
   entries,
   selected,
   onSelect,
+  fileHref,
   reviewed,
   onToggleReviewed,
   onToggleDirectoryReviewed,
@@ -483,6 +506,7 @@ function BrowserTree({
   entries: Entry[];
   selected: string;
   onSelect: (path: string) => void;
+  fileHref: (path: string) => string;
   reviewed: boolean;
   onToggleReviewed: (path: string) => void;
   onToggleDirectoryReviewed: (directory: string) => void;
@@ -491,6 +515,8 @@ function BrowserTree({
   onCollapse: (path: string, closed: boolean) => void;
 }) {
   const selectRef = useRef(onSelect);
+  const hrefRef = useRef(fileHref);
+  hrefRef.current = fileHref;
   const toggleReviewedRef = useRef(onToggleReviewed);
   const toggleDirectoryRef = useRef(onToggleDirectoryReviewed);
   const collapseRef = useRef(onCollapse);
@@ -591,6 +617,31 @@ function BrowserTree({
     if (item && !item.isSelected()) item.select();
     syncingSelection.current = false;
   }, [model, selected, paths]);
+  useEffect(() => {
+    // Pierre renders rows as buttons, with no link renderer. Intercept before
+    // its selection handler so opening a tab leaves this tab untouched.
+    let host: HTMLElement | undefined;
+    const openTab = (event: MouseEvent) => {
+      if (event.type === "auxclick" ? event.button !== 1
+        : event.button !== 0 || !(event.metaKey || event.ctrlKey)) return;
+      const row = event.composedPath().find((node): node is HTMLElement =>
+        node instanceof HTMLElement && node.dataset.type === "item");
+      if (row?.dataset.itemType !== "file" || !row.dataset.itemPath) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.open(hrefRef.current(row.dataset.itemPath), "_blank", "noopener");
+    };
+    const frame = requestAnimationFrame(() => {
+      host = model.getFileTreeContainer() || undefined;
+      host?.addEventListener("click", openTab, true);
+      host?.addEventListener("auxclick", openTab, true);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      host?.removeEventListener("click", openTab, true);
+      host?.removeEventListener("auxclick", openTab, true);
+    };
+  }, [model]);
   useEffect(() => {
     let observer: MutationObserver | undefined;
     const frame = requestAnimationFrame(() => {
@@ -1228,6 +1279,7 @@ function Review({
   const [comparing, setComparing] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(saved.selected);
+  const [viewerMode, setViewerMode] = useState(saved.viewerMode);
   const contentKey = JSON.stringify([
     tab, selected, ...(tab === "changes" ? [comparison.base, comparison.target] : []),
   ]);
@@ -1277,33 +1329,35 @@ function Review({
         () => setRestoring(false),
       );
   }, []);
-  // Review state is saved to the server's disk cache, debounced because
-  // changes fire in bursts. stateRef always holds the complete state, so a
-  // save during a compare (which freezes the view) still includes the last
-  // stable view. The flush uses keepalive and is also triggered from pagehide,
-  // so a change is never lost to closing or reloading mid-debounce.
+  const fileHref = (path: string) => viewHref(tab, comparison, path, viewerMode);
+  const initialURL = useRef(true);
+  useEffect(() => {
+    if (restoring || comparing || error) return;
+    const href = viewHref(tab, comparison, selected, viewerMode);
+    if (initialURL.current) {
+      history.replaceState(null, "", href);
+      initialURL.current = false;
+    } else if (href !== `${location.pathname}${location.search}${location.hash}`) {
+      history.pushState(null, "", href);
+    }
+  }, [restoring, comparing, error, tab, comparison, selected, viewerMode]);
+  useEffect(() => {
+    // Back/Forward use the same loading path as a direct link or new tab.
+    const restoreURL = () => location.reload();
+    window.addEventListener("popstate", restoreURL);
+    return () => window.removeEventListener("popstate", restoreURL);
+  }, []);
+
+  // Send only changed sections: navigation or preferences in another tab must
+  // never write its stale copy of comments back over the shared review.
   const stateRef = useRef<SavedState>(state);
+  const pendingState = useRef<SavedState>({});
   const stateDirty = useRef(false);
   const stateFlush = useRef<(keepalive?: boolean) => void>(() => {});
   useEffect(() => {
-    if (!restoring && !comparing) {
-      // Persist navigation inputs, never fetched files, diffs or derived labels.
-      stateRef.current = {
-        ...stateRef.current,
-        view: {
-          tab, mode, from, to, selected, search, split, wrap,
-          showFiles, showComments, filesWidth, commentsWidth, collapsed,
-          appliedMode: !comparison.target
-            ? "working"
-            : comparison.message !== undefined ? "commit" : "range",
-          base: comparison.target ? comparison.base : "",
-          target: comparison.target,
-        },
-      };
-    }
     // Mutable views are only reviewed for this page snapshot.
-    stateRef.current = {
-      ...stateRef.current,
+    const next: SavedState = {
+      view: { search, split, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
       reviewed: Object.fromEntries(
         Object.entries(reviewed).filter(
           ([scope]) => scope !== "files" && scope !== "working",
@@ -1311,22 +1365,29 @@ function Review({
       ),
       comments,
     };
-    stateDirty.current = true;
+    for (const key of ["view", "reviewed", "comments"] as const) {
+      if (JSON.stringify(next[key]) !== JSON.stringify(stateRef.current[key])) {
+        Object.assign(pendingState.current, { [key]: next[key] });
+        stateDirty.current = true;
+      }
+    }
+    stateRef.current = next;
     const timer = setTimeout(() => stateFlush.current(), 250);
     return () => clearTimeout(timer);
   }, [
-    restoring, comparing, tab, mode, from, to, selected, search, split, wrap,
-    showFiles, showComments, filesWidth, commentsWidth, collapsed, comparison,
-    reviewed, comments,
+    search, split, wrap, showFiles, showComments, filesWidth, commentsWidth,
+    collapsed, reviewed, comments,
   ]);
   useEffect(() => {
     const flush = (keepalive = false) => {
       if (!stateDirty.current) return;
       stateDirty.current = false;
+      const patch = pendingState.current;
+      pendingState.current = {};
       fetch("/api/state", {
-        method: "PUT",
+        method: "PATCH",
         headers: { "X-Rv": "1" },
-        body: JSON.stringify(stateRef.current),
+        body: JSON.stringify(patch),
         keepalive,
       })
         .then(async (response) => {
@@ -1334,6 +1395,7 @@ function Review({
           throw new Error((await response.json()).error);
         })
         .catch(() => {
+          pendingState.current = { ...patch, ...pendingState.current };
           stateDirty.current = true;
           setStorageError(
             "Could not save review state to disk. Copy your comments before closing.",
@@ -1501,16 +1563,33 @@ function Review({
     }
   }
 
+  const diffView = tab === "changes" && !messageView && viewerMode === "diff";
+  const singleSide = tab === "changes" && !messageView && viewerMode !== "diff"
+    ? viewerMode === "old" ? "deletions" : "additions"
+    : undefined;
+  const fileSource = diffView ? undefined
+    : singleSide === "deletions" ? content?.oldFile : content?.newFile;
+
+  function changeViewerMode(value: ViewerMode) {
+    setViewerMode(value);
+    setRange(null);
+    setHighlight(null);
+    setPendingComment(null);
+    setShowLinePicker(false);
+  }
+
   const onSelection = useCallback((value: SelectedLineRange | null) => {
     setHighlight(null);
     if (value) setShowComments(true);
     // A reference must use one file-side's coordinates, never mixed old/new numbers.
     setRange(
-      value?.endSide && value.endSide !== value.side
+      value && singleSide
+        ? { start: value.start, end: value.end, side: singleSide }
+        : value?.endSide && value.endSide !== value.side
         ? { ...value, end: value.start, endSide: value.side }
         : value,
     );
-  }, []);
+  }, [singleSide]);
   const options = useMemo(
     () => ({
       theme: "light-plus" as const,
@@ -1527,7 +1606,9 @@ function Review({
     [split, wrap, expandedDiff, contentKey, onSelection],
   );
   const prompt = formatPrompt(comments);
-  const notice = content?.newFile?.notice || content?.oldFile?.notice;
+  const notice = diffView
+    ? content?.newFile?.notice || content?.oldFile?.notice
+    : fileSource?.notice;
   const start = range ? Math.min(range.start, range.end) : 1;
   const end = range ? Math.max(range.start, range.end) : 1;
 
@@ -1542,13 +1623,14 @@ function Review({
     );
   }
   function matchesView(comment: Comment) {
-    return comment.path === selected && matchesScope(comment);
+    return comment.path === selected && matchesScope(comment) &&
+      (!singleSide || (comment.side || "additions") === singleSide);
   }
   function commentRange(comment: Comment): SelectedLineRange {
     return {
       start: comment.start,
       end: comment.end,
-      ...(tab === "changes" && !messageView
+      ...(diffView
         ? {
             side:
               comment.side === "deletions"
@@ -1559,7 +1641,7 @@ function Review({
     };
   }
   const fileDiff = useMemo(() => {
-    if (!content || tab !== "changes" || messageView || notice ||
+    if (!content || !diffView || notice ||
         !(content.oldFile || content.newFile)) return null;
     let diff = parsedDiffs.current.get(contentKey);
     if (!diff) {
@@ -1569,7 +1651,7 @@ function Review({
       parsedDiffs.current.set(contentKey, diff);
     }
     return diff;
-  }, [content, contentKey, tab, notice, messageView]);
+  }, [content, contentKey, diffView, notice]);
   const annotations = comments.filter(matchesView).map((comment) => ({
     lineNumber: comment.end,
     side:
@@ -1592,12 +1674,12 @@ function Review({
   }
   const items: CodeViewItem<Comment>[] =
     content && !notice
-      ? (tab === "files" || messageView) && content.newFile
+      ? fileSource
         ? [
             {
               type: "file",
               id: selected,
-              file: content.newFile,
+              file: fileSource,
               annotations,
               version: itemVersion.current,
             },
@@ -1616,6 +1698,10 @@ function Review({
       : [];
   const highlightedRange =
     highlight && matchesView(highlight) ? commentRange(highlight) : range;
+  // Full-file rendering has one column; side metadata is only for the comment.
+  const viewerRange = highlightedRange && !diffView
+    ? { start: highlightedRange.start, end: highlightedRange.end }
+    : highlightedRange;
   const sidebarAdditions = entries.reduce(
     (sum, entry) => sum + (entry.additions || 0),
     0,
@@ -1639,7 +1725,7 @@ function Review({
       align: "center",
     });
     setPendingComment(null);
-  }, [pendingComment, content, loading, comparing]);
+  }, [pendingComment, content, loading, comparing, viewerMode]);
 
   async function openComment(comment: Comment) {
     const id = ++comparisonRequest.current;
@@ -1647,6 +1733,8 @@ function Review({
     setRange(null);
     setHighlight(comment);
     setError("");
+    if (viewerMode !== "diff" && comment.context !== "File" && !comment.commit)
+      setViewerMode(comment.side === "deletions" ? "old" : "new");
     if (matchesView(comment)) {
       setPendingComment(comment);
       return;
@@ -1904,7 +1992,8 @@ function Review({
     }
     const first = Number(match[1]);
     const last = Number(match[2] || match[1]);
-    const source = lineSide === "deletions" ? content?.oldFile : content?.newFile;
+    const side = singleSide || lineSide;
+    const source = side === "deletions" ? content?.oldFile : content?.newFile;
     const lineCount = source?.contents ? source.contents.split("\n").length : 0;
     if (first < 1 || last < 1 || first > lineCount || last > lineCount) {
       setLineError(`Choose a line between 1 and ${lineCount}.`);
@@ -1913,7 +2002,7 @@ function Review({
     const nextRange: SelectedLineRange = {
       start: Math.min(first, last),
       end: Math.max(first, last),
-      ...(tab === "changes" && !messageView ? { side: lineSide } : {}),
+      ...(tab === "changes" && !messageView ? { side } : {}),
     };
     setShowLinePicker(false);
     setShowComments(true);
@@ -1922,7 +2011,7 @@ function Review({
     requestAnimationFrame(() => viewer.current?.scrollTo({
       type: "range",
       id: selected,
-      range: nextRange,
+      range: diffView ? nextRange : { start: nextRange.start, end: nextRange.end },
       align: "center",
     }));
   }
@@ -2005,9 +2094,9 @@ function Review({
         );
       } else if (key === "j") moveFile(1);
       else if (key === "k") moveFile(-1);
-      else if (key === "l" && content && !notice) {
+      else if (key === "l" && content && !notice && (diffView || fileSource)) {
         setLineTarget(range ? `${start}${end !== start ? `-${end}` : ""}` : "");
-        setLineSide(range?.side === "deletions" ? "deletions" : "additions");
+        setLineSide(singleSide || (range?.side === "deletions" ? "deletions" : "additions"));
         setLineError("");
         setShowLinePicker(true);
       } else if (key === "r" && event.shiftKey) location.reload();
@@ -2015,7 +2104,7 @@ function Review({
       else if (key === "u") undo();
       else if (key === "y" && comments.length) void copyPrompt();
       else if (key === "p" && comments.length) setShowPrompt(true);
-      else if (key === "v" && tab === "changes" && !messageView) setSplit((value) => !value);
+      else if (key === "v" && diffView) setSplit((value) => !value);
       else if (key === "w") setWrap((value) => !value);
       else if (key === "b") setShowFiles((value) => !value);
       else if (key === "c") setShowComments((value) => !value);
@@ -2290,6 +2379,7 @@ function Review({
                     entries={entries}
                     selected={groupPaths.includes(selected) ? selected : ""}
                     onSelect={select}
+                    fileHref={fileHref}
                     reviewed={done}
                     onToggleReviewed={togglePathReviewed}
                     onToggleDirectoryReviewed={toggleDirectoryReviewed}
@@ -2321,16 +2411,42 @@ function Review({
         </aside>
         <main className="main">
           <div className="file-heading">
-            <span className="file-path">
+            <a
+              className="file-path"
+              href={messageView || paths.includes(selected) ? fileHref(selected) : undefined}
+              onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+              }}
+            >
               {messageView
                 ? `Commit message · ${comparison.target.slice(0, 7)}`
                 : selected && paths.includes(selected)
                   ? selected
                   : "No file selected"}
-            </span>
+            </a>
             <div className="view-controls">
               {tab === "changes" && !messageView && (
-                <div className="segmented">
+                <div className="viewer-modes" role="group" aria-label="File view">
+                  {(["diff", "old", "new"] as const).map((value) => (
+                    <a
+                      key={value}
+                      href={viewHref(tab, comparison, selected, value)}
+                      aria-label={`View ${value}`}
+                      aria-current={viewerMode === value ? "true" : undefined}
+                      onClick={(event) => {
+                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                        event.preventDefault();
+                        changeViewerMode(value);
+                      }}
+                    >
+                      {value === "diff" ? "Diff" : value === "old" ? "Old" : "New"}
+                    </a>
+                  ))}
+                </div>
+              )}
+              {diffView && (
+                <div className="segmented" role="group" aria-label="Diff layout">
                   <button aria-pressed={!split} onClick={() => setSplit(false)}>
                     Unified
                   </button>
@@ -2393,7 +2509,7 @@ function Review({
           )}
           <div
             className="code-pane"
-            key={`${tab}:${selected}:${comparison.base}:${comparison.target}`}
+            key={`${tab}:${selected}:${comparison.base}:${comparison.target}:${viewerMode}`}
           >
             {loading || comparing || restoring ? (
               <div className="empty">
@@ -2436,6 +2552,11 @@ function Review({
                 <h2>Preview unavailable</h2>
                 <p>{notice}</p>
               </div>
+            ) : content && singleSide && !fileSource ? (
+              <div className="empty">
+                <h2>File does not exist in the {viewerMode} revision</h2>
+                <p>{viewerMode === "old" ? "This file was added." : "This file was deleted."}</p>
+              </div>
             ) : content && (content.newFile || content.oldFile) ? (
               <>
                 <CodeView
@@ -2444,8 +2565,8 @@ function Review({
                   items={items}
                   options={options}
                   selectedLines={
-                    highlightedRange
-                      ? { id: selected, range: highlightedRange }
+                    viewerRange
+                      ? { id: selected, range: viewerRange }
                       : null
                   }
                   onSelectedLinesChange={(selection) =>
@@ -2471,7 +2592,7 @@ function Review({
                     </button>
                   )}
                 />
-                {!(content.newFile?.contents || content.oldFile?.contents) && (
+                {!(diffView ? content.newFile?.contents || content.oldFile?.contents : fileSource?.contents) && (
                   <p className="empty">Empty file</p>
                 )}
               </>
@@ -2770,6 +2891,7 @@ function Review({
           paths={paths}
           reviewed={reviewedInView || []}
           onSelect={select}
+          fileHref={fileHref}
           onClose={() => setShowFinder(false)}
         />
       )}
@@ -2804,7 +2926,7 @@ function Review({
                   setLineError("");
                 }}
               />
-              {tab === "changes" && !messageView && (
+              {diffView && (
                 <label className="line-side">
                   Side
                   <select value={lineSide} onChange={(event) => setLineSide(event.target.value as "additions" | "deletions")}>

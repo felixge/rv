@@ -46,6 +46,7 @@ button:disabled {
   cursor: default;
 }
 button:focus-visible,
+.viewer-modes a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
@@ -694,6 +695,7 @@ button.panel-toggle:hover {
 }
 .file-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 45px;
@@ -707,7 +709,12 @@ button.panel-toggle:hover {
   color: #596371;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-decoration: none;
   white-space: nowrap;
+}
+.file-path[href]:hover,
+.file-path[href]:focus-visible {
+  text-decoration: underline;
 }
 .review-toggle {
   margin-left: auto;
@@ -724,6 +731,7 @@ button.panel-toggle:hover {
 }
 .view-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-left: auto;
@@ -739,18 +747,30 @@ button.panel-toggle:hover {
   background: #eaf2fc;
   border-color: #b8d1ec;
 }
-.segmented {
+.segmented,
+.viewer-modes {
   display: flex;
   border: 1px solid #e0e4ea;
   border-radius: 4px;
   padding: 2px;
 }
-.segmented button {
+.segmented button,
+.viewer-modes a {
   border: none;
   font-size: 10px;
   padding: 3px 7px;
 }
-.segmented button[aria-pressed="true"] {
+.viewer-modes a {
+  color: #4a515c;
+  border-radius: 5px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.viewer-modes a:hover {
+  background: #f1f4f8;
+}
+.segmented button[aria-pressed="true"],
+.viewer-modes a[aria-current="true"] {
   background: #edf1f6;
   color: #3f5b7c;
 }
@@ -1122,7 +1142,7 @@ button.panel-toggle:hover {
   overflow: auto;
   padding: 0 10px 10px;
 }
-.finder-results button {
+.finder-results a {
   width: 100%;
   min-height: 43px;
   display: flex;
@@ -1130,9 +1150,12 @@ button.panel-toggle:hover {
   gap: 18px;
   padding: 8px 10px;
   border: 0;
+  border-radius: 5px;
+  color: inherit;
+  text-decoration: none;
   text-align: left;
 }
-.finder-results button.active {
+.finder-results a.active {
   background: #eaf2fc;
   color: #125eaa;
 }

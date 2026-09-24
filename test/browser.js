@@ -169,6 +169,190 @@ try {
   await browser("open", url);
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");
+
+  // A modified click opens the exact file/scope without navigating its source.
+  // Check actual tabs and rendered contents, not just a mocked window.open.
+  const originalTab = (await browser("tab", "list")).tabs[0].tabId;
+  for (const [scope, gesture, expectedText] of [
+    ["mode=files&path=README.md", "Meta", "THRESHOLD = 75"],
+    ["mode=working&path=README.md", "Control", "THRESHOLD = 75"],
+    [`mode=commit&to=${f.second}`, "middle", "const baseRate = 5"],
+    [`mode=range&from=${f.first}&to=${f.third}`, "Meta", "THRESHOLD = 100"],
+  ]) {
+    await browser("open", `${url}/?${scope}`);
+    await wait("document.querySelector('.file-tree') && !document.querySelector('.loading')");
+    await hoverTree("shipping.ts");
+    const originalURL = await evaluate("location.href");
+    const originalPath = await evaluate("document.querySelector('.file-path').textContent");
+    if (gesture === "middle") {
+      await browser("mouse", "down", "middle");
+      await browser("mouse", "up", "middle");
+    } else {
+      // agent-browser's mouse commands do not carry held keyboard modifiers.
+      // Dispatch the modified event through the real tree, without mocking open.
+      await evaluate(`document.querySelector('file-tree-container').shadowRoot
+        .querySelector('[data-item-path="src/shipping.ts"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true,
+          cancelable: true, ${gesture === "Meta" ? "metaKey" : "ctrlKey"}: true }))`);
+    }
+    const tabs = (await browser("tab", "list")).tabs;
+    assert.equal(tabs.length, 2, `${gesture}-click should open one tab`);
+    const opened = tabs.find((tab) => tab.tabId !== originalTab);
+    await browser("tab", opened.tabId);
+    await wait(`${shadow}?.querySelector('pre')?.textContent.includes(${JSON.stringify(expectedText)})`);
+    assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+    assert.equal(await evaluate("new URLSearchParams(location.search).get('mode')"), new URLSearchParams(scope).get("mode"));
+    await browser("reload");
+    await wait(`${shadow}?.querySelector('pre')?.textContent.includes(${JSON.stringify(expectedText)})`);
+    const headerHref = await evaluate("document.querySelector('a.file-path').href");
+    assert.equal(headerHref, await evaluate("location.href"));
+    await browser("click", "a.file-path", "--new-tab");
+    const headerTabs = (await browser("tab", "list")).tabs;
+    assert.equal(headerTabs.length, 3);
+    const headerTab = headerTabs.find((tab) => tab.tabId !== originalTab && tab.tabId !== opened.tabId);
+    await browser("tab", headerTab.tabId);
+    await wait(`${shadow}?.querySelector('pre')?.textContent.includes(${JSON.stringify(expectedText)})`);
+    assert.equal(await evaluate("location.href"), headerHref);
+    await browser("tab", "close", headerTab.tabId);
+    await browser("tab", "close", opened.tabId);
+    await browser("tab", originalTab);
+    assert.equal(await evaluate("location.href"), originalURL);
+    assert.equal(await evaluate("document.querySelector('.file-path').textContent"), originalPath);
+  }
+  await browser("open", `${url}/?mode=files&path=README.md`);
+  await wait("document.querySelector('.file-tree')");
+  await tree("shipping.ts");
+  await wait("new URLSearchParams(location.search).get('path') === 'src/shipping.ts'");
+  await browser("back");
+  await wait("document.querySelector('.file-path')?.textContent === 'README.md'");
+  await browser("forward");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`);
+  await browser("press", "f");
+  await browser("wait", ".finder-results a");
+  const finderHref = await evaluate("Array.from(document.querySelectorAll('.finder-results a')).find(a => a.textContent.includes('README.md')).href");
+  assert.equal(new URL(finderHref).searchParams.get("path"), "README.md");
+  assert.equal(new URL(finderHref).searchParams.get("mode"), "files");
+  await browser("click", '.finder-results a[href*="README.md"]', "--new-tab");
+  const finderTab = (await browser("tab", "list")).tabs.find((tab) => tab.tabId !== originalTab);
+  await browser("tab", finderTab.tabId);
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('A small, predictable shipping calculator.')`);
+  await browser("tab", "close", finderTab.tabId);
+  await browser("tab", originalTab);
+  await browser("open", url);
+  await wait("document.querySelector('.file-tree')");
+  assert.equal(await evaluate("document.querySelector('.file-path').hasAttribute('href')"), false);
+  console.log("PASS Cmd/Ctrl/middle-click preserves the source tab; new tabs and reload retain files, working/commit/range scopes; Back/Forward, finder and viewer header links work");
+
+  await browser("open", `${url}/?mode=commit&to=${f.second}&path=src%2Fshipping.ts`);
+  await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
+  await browser("click", '[aria-label="View old"]');
+  const modeSourceURL = await evaluate("location.href");
+  for (const mode of ["diff", "new", "old"]) {
+    const selector = `[aria-label="View ${mode}"]`;
+    // Modified primary clicks must reach the browser's native link handling.
+    // Cancel at document only after observing the app's handler, so this also
+    // catches regressions where a modifier switches the source tab's mode.
+    for (const modifier of ["metaKey", "ctrlKey"]) {
+      assert.equal(await evaluate(`(() => {
+        let prevented;
+        document.addEventListener('click', event => {
+          prevented = event.defaultPrevented;
+          event.preventDefault();
+        }, { once: true });
+        document.querySelector(${JSON.stringify(selector)}).dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, ${modifier}: true }));
+        return prevented;
+      })()`), false);
+    }
+    await browser("hover", selector);
+    await browser("mouse", "down", "middle");
+    await browser("mouse", "up", "middle");
+    const tabs = (await browser("tab", "list")).tabs;
+    assert.equal(tabs.length, 2);
+    const modeTab = tabs.find((tab) => tab.tabId !== originalTab);
+    await browser("tab", modeTab.tabId);
+    await wait(`${shadow}?.querySelector('pre')`);
+    assert.equal(await evaluate("new URLSearchParams(location.search).get('view')"), mode);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-current')`), "true");
+    assert.equal(await evaluate("new URLSearchParams(location.search).get('to')"), f.second);
+    assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "src/shipping.ts");
+    await browser("tab", "close", modeTab.tabId);
+    await browser("tab", originalTab);
+    assert.equal(await evaluate("location.href"), modeSourceURL);
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"View old\"]').getAttribute('aria-current')"), "true");
+  }
+  console.log("PASS Diff/Old/New links allow Cmd/Ctrl-click defaults and real middle-click opens the requested mode without changing the source tab");
+  for (const mode of ["old", "new"]) {
+    await browser("find", "role", "link", "click", "--name", `View ${mode}`, "--exact");
+    const expected = mode === "old" ? "const baseRate = 5" : 'order.country === "DE" ? 5 : 12';
+    await wait(`${shadow}?.querySelector('pre')?.textContent.includes(${JSON.stringify(expected)})`);
+    const text = await codeText();
+    assert.doesNotMatch(text, /THRESHOLD/); // Neither side is the current working file.
+    if (mode === "old") assert.doesNotMatch(text, /order.country ===/);
+    else assert.doesNotMatch(text, /const baseRate = 5/);
+    assert.equal(await evaluate(`Boolean(${shadow}?.querySelector('[data-line-type="change-deletion"], [data-line-type="change-addition"]'))`), false);
+    assert.equal(await evaluate("Boolean(document.querySelector('[aria-label=\"Diff layout\"]'))"), false);
+    const href = await evaluate("document.querySelector('a.file-path').href");
+    assert.equal(new URL(href).searchParams.get("view"), mode);
+    assert.equal(new URL(href).searchParams.get("to"), f.second);
+    await browser("click", "a.file-path", "--new-tab");
+    const sideTab = (await browser("tab", "list")).tabs.find((tab) => tab.tabId !== originalTab);
+    await browser("tab", sideTab.tabId);
+    await wait(`${shadow}?.querySelector('pre')?.textContent.includes(${JSON.stringify(expected)})`);
+    assert.equal(await evaluate(`document.querySelector('[aria-label="View ${mode}"]').getAttribute('aria-current')`), "true");
+    await browser("reload");
+    await wait(`${shadow}?.querySelector('pre')?.textContent.includes(${JSON.stringify(expected)})`);
+    await browser("tab", "close", sideTab.tabId);
+    await browser("tab", originalTab);
+    if (mode === "old") await line(7);
+    else {
+      await browser("press", "l");
+      await browser("fill", "#line-target", "7");
+      assert.equal(await evaluate("Boolean(document.querySelector('.line-side'))"), false);
+      await click("Start comment");
+    }
+    await browser("fill", "#comment-text", `Comment on the ${mode} revision.`);
+    await click("Add comment");
+    const state = await waitState((state) => state.comments.some((comment) => comment.text === `Comment on the ${mode} revision.`));
+    const comment = state.comments.find((comment) => comment.text === `Comment on the ${mode} revision.`);
+    assert.equal(comment.side, mode === "old" ? "deletions" : "additions");
+    assert.equal(comment.start, 7);
+    assert.equal(await evaluate("document.querySelectorAll('.comment-marker').length"), 1);
+  }
+  // Opening an opposite-side comment must reveal that side, not highlight the
+  // same line number in the wrong revision.
+  await browser("click", ".comment:first-child");
+  await wait("document.querySelector('[aria-label=\"View old\"]').getAttribute('aria-current') === 'true'");
+  await wait(`${shadow}?.querySelector('[data-selected-line]')`);
+  assert.deepEqual(await highlightedLines(), [7]);
+  assert.match(await codeText(), /const baseRate = 5/);
+  await browser("click", '[aria-label="View diff"]');
+  await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
+  assert.equal(await evaluate("document.querySelectorAll('.comment-marker').length"), 2);
+  assert.equal(await evaluate("new URL(document.querySelector('.file-path').href).searchParams.get('view')"), "diff");
+  await browser("back");
+  await wait("document.querySelector('[aria-label=\"View old\"]')?.getAttribute('aria-current') === 'true'");
+  await browser("forward");
+  await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
+  await click("Clear");
+  await browser("dialog", "accept");
+  await waitState((state) => state.comments.length === 0);
+  await browser("open", `${url}/?mode=working&path=src%2Fdiscount.ts&view=old`);
+  await wait("document.querySelector('.code-pane').textContent.includes('File does not exist in the old revision')");
+  await browser("click", '[aria-label="View new"]');
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export function discount')`);
+  await browser("open", `${url}/?mode=working&path=src%2Flegacy.ts&view=new`);
+  await wait("document.querySelector('.code-pane').textContent.includes('File does not exist in the new revision')");
+  await browser("click", '[aria-label="View old"]');
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('freeShipping = false')`);
+  await browser("open", `${url}/?mode=working&path=src%2Fshipping.ts&view=unknown`);
+  await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"View diff\"]').getAttribute('aria-current')"), "true");
+  await browser("open", url);
+  await wait("document.querySelector('.file-tree')");
+  assert.equal(await evaluate("Boolean(document.querySelector('.viewer-modes'))"), false);
+  console.log("PASS Diff/Old/New show exact revisions, preserve mode in header links/reloads/history, keep comments on their side and handle added/deleted files");
+
   assert.equal(
     await evaluate(
       `document.querySelector('.status-right').textContent.trim().endsWith(${JSON.stringify(`rv ${rvVersion}`)})`,
@@ -391,7 +575,7 @@ try {
   await browser("press", "f");
   await browser("wait", '[aria-label="Fuzzy find file"]');
   assert.deepEqual(
-    await evaluate("Array.from(document.querySelectorAll('.finder-results button')).map(e => ({ path: e.querySelector('.finder-path').textContent, state: e.querySelector('.finder-state').textContent.trim() }))"),
+    await evaluate("Array.from(document.querySelectorAll('.finder-results a')).map(e => ({ path: e.querySelector('.finder-path').textContent, state: e.querySelector('.finder-state').textContent.trim() }))"),
     [
       { path: "src/discount.ts", state: "Unreviewed" },
       { path: "src/shipping.ts", state: "Unreviewed" },
@@ -886,8 +1070,14 @@ try {
   assert.equal(await evaluate("document.querySelector('.code-footer').textContent.trim()"), `Commit ${f.first.slice(0, 7)}`);
   assert.match(await evaluate("document.querySelector('[aria-label=\"Review scope\"]').textContent"), /Add shipping calculator/);
   await reviewRange();
-  assert.match(await evaluate("document.querySelector('[aria-label=\"Target revision\"]').textContent"), /Introduce free shipping threshold/);
-  console.log("PASS unsubmitted range pickers survive reload without changing the applied commit");
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Target revision\"]').textContent"), /Add shipping calculator/);
+  console.log("PASS reload uses the applied comparison from the URL, not unsubmitted range pickers");
+  await click("Base revision");
+  await browser("fill", '[aria-label="Search base commits"]', f.first);
+  await browser("press", "Enter");
+  await click("Target revision");
+  await browser("fill", '[aria-label="Search target commits"]', f.third);
+  await browser("press", "Enter");
   await click("Compare");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`,
@@ -998,7 +1188,7 @@ try {
   await wait("document.querySelectorAll('.comment').length === 3");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`);
   await reviewRange();
-  assert.match(await evaluate("document.querySelector('[aria-label=\"Base revision\"]').textContent"), /nonexistent-ref/);
+  assert.match(await evaluate("document.querySelector('[aria-label=\"Base revision\"]').textContent"), /Add shipping calculator/);
   // Refresh restores the successful comparison, not the failed draft ref.
   await reviewScope("Uncommitted changes");
   await reviewScope("File Browser");
@@ -1224,7 +1414,7 @@ try {
   assert.equal(await evaluate("document.querySelector('#review-comments').getBoundingClientRect().width"), beforeClearCommentsWidth);
   assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Mark reviewed')"), true);
   // Clear updates comments and review progress while preserving the view.
-  await waitState((state) => !state.comments.length && !Object.keys(state.reviewed).length && state.view.selected === "src/shipping.ts" && state.view.showComments === false);
+  await waitState((state) => !state.comments.length && !Object.keys(state.reviewed).length && !("selected" in state.view) && state.view.showComments === false);
   assert.equal(await evaluate("localStorage.getItem('rv:comments:/another-repo')"), "keep me");
   assert.doesNotMatch(await evaluate("document.body.textContent"), /Clear Comments|Undo/);
   await capture("comments-cleared");
@@ -1456,11 +1646,11 @@ try {
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
   assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
   // The app re-saves its validated view, dropping unknown fields and values.
-  await waitState((state) => state.view && !("futureField" in state.view) && state.view.tab === "files");
+  await waitState((state) => state.view && !("futureField" in state.view) && !("tab" in state.view));
   await browser("open", "about:blank");
   await new Promise((resolve) => setTimeout(resolve, 500));
   await saveState(f.root, { ...withComment, view: { tab: "changes", mode: "commit", appliedMode: "commit", target: "missing-commit", selected: "src/shipping.ts" } });
-  await browser("open", url);
+  await browser("open", `${url}/?mode=commit&to=missing-commit&path=src%2Fshipping.ts`);
   await wait("document.querySelector('[role=alert]')?.textContent.includes('Unknown commit')");
   await new Promise((resolve) => setTimeout(resolve, 500));
   const beforeInvalidViewClear = await loadState(f.root);
@@ -1473,6 +1663,32 @@ try {
   assert.deepEqual(await comments(), []);
   assert.match(await evaluate("document.querySelector('[role=alert]').textContent"), /Unknown commit/);
   console.log("PASS corrupt/obsolete view state falls back safely; Clear removes comments without changing an invalid saved view");
+
+  const unusualPath = "src/space #?&+% ü.ts";
+  await f.write(unusualPath, "export const unusual = true;\n");
+  await browser("open", url);
+  await wait("document.querySelector('file-tree-container')?.shadowRoot?.querySelector('[data-item-path=\"src/space #?&+% ü.ts\"]')");
+  await tree("space #?&+% ü.ts");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('unusual = true')`);
+  const unusualURL = await evaluate("location.href");
+  assert.equal(new URL(unusualURL).searchParams.get("path"), unusualPath);
+  await browser("tab", "new", unusualURL);
+  const commentTab = (await browser("tab", "list")).tabs.find((tab) => tab.tabId !== originalTab);
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('unusual = true')`);
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), unusualPath);
+  await line(1);
+  await browser("fill", "#comment-text", "Keep this comment from the other tab.");
+  await click("Add comment");
+  await waitState((state) => state.comments.length === 1);
+  await browser("tab", originalTab);
+  assert.deepEqual(await comments(), []); // This tab still has its older snapshot.
+  await tree("README.md");
+  await click("Wrap long lines");
+  const savedWrap = await evaluate("document.querySelector('[aria-label=\"Wrap long lines\"]').getAttribute('aria-pressed') === 'true'");
+  const preserved = await waitState((state) => state.view.wrap === savedWrap);
+  assert.equal(preserved.comments[0].text, "Keep this comment from the other tab.");
+  await browser("tab", "close", commentTab.tabId);
+  console.log("PASS URLs round-trip reserved characters and Unicode; navigation and preference saves preserve another tab's newer comments");
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);
   console.log("PASS no browser errors\nBrowser verification complete.");

@@ -40,7 +40,19 @@ rv opens a browser and serves a read-only review UI on localhost. Refresh the
 page when you want to load new repository changes; nothing is written back to
 the repository.
 
-Your review state (comments, reviewed marks, view settings) is cached on local
+Cmd-click (Ctrl-click on Windows/Linux) or middle-click a filename to open it
+in a new tab. The URL records the selected file and review scope, including
+the revisions for a commit or range. Copy or bookmark it to return to that
+view; browser Back/Forward also works. Each tab navigates independently.
+Opening the bare URL starts in the File Browser; unsubmitted range choices
+are temporary and do not survive reload.
+
+In the diff viewer, choose **Diff**, **Old**, or **New** to see the comparison
+or the complete file before or after the change. File links preserve this
+choice in the URL (`view=diff`, `view=old`, or `view=new`). Comments on Old and
+New use that revision's line numbers.
+
+Your review state (comments, reviewed marks, layout preferences) is cached on local
 disk, outside the repository, in one readable directory per opened path —
 `~/.cache/rv/--home-you-repo--/state.json` on Linux,
 `~/Library/Caches/rv/--Users-you-repo--/state.json` on macOS. It survives
