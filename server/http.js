@@ -122,7 +122,34 @@ export function createApp(repo, { allowRemote = false } = {}) {
       const filename = path.resolve(dist, name);
       if (!filename.startsWith(dist))
         return send(403, { error: "Invalid path." });
-      const data = await readFile(filename);
+      // Vite fingerprints these filenames. Cache only successful asset reads;
+      // HTML and every API response must stay fresh across builds and reviews.
+      const asset = /^assets\/.+-[\w-]{8,}\.(js|css|wasm|svg)$/.test(name);
+      const acceptsGzip = (req.headers["accept-encoding"] || "")
+        .split(",")
+        .some((value) => {
+          const [encoding, ...params] = value.trim().split(";");
+          const quality = params.find((param) => param.trim().startsWith("q="));
+          return encoding === "gzip" && (!quality || Number(quality.trim().slice(2)) > 0);
+        });
+      let data;
+      let compressed = false;
+      if (asset && acceptsGzip) {
+        try {
+          data = await readFile(`${filename}.gz`);
+          compressed = true;
+        } catch (error) {
+          // Builds predating precompression can still be served.
+          if (error.code !== "ENOENT") throw error;
+        }
+      }
+      data ??= await readFile(filename);
+      if (asset) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Vary", "Accept-Encoding");
+      }
+      if (compressed) res.setHeader("Content-Encoding", "gzip");
+      res.setHeader("Content-Length", data.length);
       res.writeHead(200, {
         "Content-Type":
           types[path.extname(filename)] || "application/octet-stream",

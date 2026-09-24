@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { get } from "node:http";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -259,7 +259,45 @@ test("HTTP is read-only, blocks cross-origin reads and serves the built UI", asy
   });
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal((await response.json()).commits.length, 3);
-  assert.match(await (await fetch(url)).text(), /rv — local code review/);
+  const html = await fetch(url);
+  assert.equal(html.headers.get("cache-control"), "no-store");
+  assert.match(await html.text(), /rv — local code review/);
+});
+
+test("built assets are compressed and immutable, but HTML, API data and errors are never cached", async (t) => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  const server = createApp(await repository(f.root));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const assets = await readdir(new URL("../dist/assets/", import.meta.url));
+  // Exercise the entrypoint, CSS, workers, WASM and lazy language chunks.
+  for (const prefix of ["index-", "worker-", "wasm-", "typescript-"]) {
+    const names = assets.filter(name => name.startsWith(prefix) && /\.(js|css)$/.test(name));
+    assert.ok(names.length, `Missing built ${prefix} assets`);
+    for (const name of names) {
+      const plain = await fetch(`${url}/assets/${name}`, { headers: { "Accept-Encoding": "identity" } });
+      assert.equal(plain.headers.get("content-encoding"), null);
+      const expected = await plain.text();
+      const gzip = await fetch(`${url}/assets/${name}`, { headers: { "Accept-Encoding": "br, gzip;q=0.8" } });
+      assert.equal(gzip.headers.get("cache-control"), "public, max-age=31536000, immutable");
+      assert.equal(gzip.headers.get("vary"), "Accept-Encoding");
+      assert.equal(gzip.headers.get("content-encoding"), "gzip");
+      assert.equal(gzip.headers.get("content-type"), plain.headers.get("content-type"));
+      assert.ok(Number(gzip.headers.get("content-length")) < Buffer.byteLength(expected) / 2);
+      assert.equal(await gzip.text(), expected); // fetch decompresses the wire bytes
+      const declined = await fetch(`${url}/assets/${name}`, { headers: { "Accept-Encoding": "gzip;q=0, identity" } });
+      assert.equal(declined.headers.get("content-encoding"), null);
+      assert.equal(await declined.text(), expected);
+    }
+  }
+  for (const route of ["/", "/index.html", "/api/info", "/api/state", "/api/file?path=src/shipping.ts", "/assets/missing-12345678.js"]) {
+    const response = await fetch(url + route, { headers: { "X-Rv": "1" } });
+    assert.equal(response.headers.get("cache-control"), "no-store", route);
+    if (route.includes("missing")) assert.equal(response.status, 404);
+    await response.arrayBuffer();
+  }
 });
 
 test("prompt contains only exact file:line references and associated comments", () => {

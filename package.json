@@ -19,7 +19,7 @@
     "start": "node bin/rv.js",
     "test": "node --test test/*.test.js",
     "test:browser": "node test/browser.js",
-    "test:performance": "node test/navigation.js",
+    "test:performance": "node test/startup.js && node test/navigation.js",
     "prepack": "npm run build"
   },
   "dependencies": {
