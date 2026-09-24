@@ -1791,6 +1791,39 @@ try {
   assert.equal(preserved.comments[0].text, "Keep this comment from the other tab.");
   await browser("tab", "close", commentTab.tabId);
   console.log("PASS URLs round-trip reserved characters and Unicode; navigation and preference saves preserve another tab's newer comments");
+
+  // Native browser find cannot see lines which CodeView has virtualized out of
+  // the DOM. Cmd/Ctrl+F must use the source text and navigate to those lines.
+  const longLines = Array.from({ length: 650 }, (_, index) =>
+    index === 419 || index === 579
+      ? `const distantSearchTarget${index + 1} = "distantSearchTarget";`
+      : `const value${index + 1} = ${index + 1};`,
+  );
+  await f.write("src/long.ts", `${longLines.join("\n")}\n`);
+  await browser("open", `${url}/?mode=files&path=src%2Flong.ts`);
+  await wait("document.querySelector('.file-path')?.textContent === 'src/long.ts'");
+  assert.equal(
+    await evaluate(`${shadow}.textContent.includes('distantSearchTarget')`),
+    false,
+    "The regression fixture must begin outside the virtualized DOM window",
+  );
+  await browser("press", "Control+f");
+  await browser("fill", '[aria-label="Find in viewed file"]', "distantSearchTarget");
+  await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
+  await wait(`${shadow}.querySelector('[data-column-number="420"][data-selected-line]')`);
+  assert.deepEqual(await highlightedLines(), [420]);
+  await browser("press", "Enter");
+  await wait("document.querySelector('.text-search span')?.textContent === '2/2'");
+  await wait(`${shadow}.querySelector('[data-column-number="580"][data-selected-line]')`);
+  assert.deepEqual(await highlightedLines(), [580]);
+  await browser("press", "Shift+Enter");
+  await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
+  await wait(`${shadow}.querySelector('[data-column-number="420"][data-selected-line]')`);
+  assert.deepEqual(await highlightedLines(), [420]);
+  await browser("press", "Escape");
+  assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
+  console.log("PASS Cmd/Ctrl+F finds, counts and cycles through lines outside the virtualized DOM window");
+
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);
   console.log("PASS no browser errors\nBrowser verification complete.");

@@ -60,6 +60,10 @@ type Comment = {
 };
 type Content = { oldFile: Source; newFile: Source };
 type ViewerMode = "diff" | "old" | "new";
+type TextSearchMatch = {
+  line: number;
+  side?: "additions" | "deletions";
+};
 // The server-side disk cache, loaded once and saved back debounced.
 type SavedState = {
   view?: Record<string, unknown>;
@@ -99,6 +103,89 @@ function restoreScroll(root: string, key: string, element: HTMLElement) {
   if (position) element.scrollTo(position.left, position.top);
 }
 
+function textSearchMatches(
+  query: string,
+  file: Source,
+  diff: FileDiffMetadata | null,
+  split: boolean,
+  expanded: boolean,
+) {
+  const needle = query.toLowerCase();
+  if (!needle) return [];
+  const matches: TextSearchMatch[] = [];
+  const addLine = (
+    text: string | undefined,
+    line: number,
+    side?: TextSearchMatch["side"],
+  ) => {
+    const value = text?.toLowerCase() || "";
+    if (value.includes(needle)) matches.push({ line, side });
+  };
+  if (file) {
+    file.contents.split("\n").forEach((line, index) => addLine(line, index + 1));
+    return matches;
+  }
+  if (!diff) return matches;
+
+  const context = (
+    deletionStart: number,
+    additionStart: number,
+    count: number,
+  ) => {
+    if (split) {
+      for (let index = 0; index < count; index++)
+        addLine(diff.deletionLines[deletionStart + index], deletionStart + index + 1, "deletions");
+    }
+    for (let index = 0; index < count; index++)
+      addLine(diff.additionLines[additionStart + index], additionStart + index + 1, "additions");
+  };
+  let deletionCursor = 0;
+  let additionCursor = 0;
+  for (const hunk of diff.hunks) {
+    if (expanded) {
+      context(
+        deletionCursor,
+        additionCursor,
+        Math.min(
+          hunk.deletionLineIndex - deletionCursor,
+          hunk.additionLineIndex - additionCursor,
+        ),
+      );
+    }
+    for (const content of hunk.hunkContent) {
+      if (content.type === "context") {
+        context(content.deletionLineIndex, content.additionLineIndex, content.lines);
+      } else {
+        for (let index = 0; index < content.deletions; index++)
+          addLine(
+            diff.deletionLines[content.deletionLineIndex + index],
+            content.deletionLineIndex + index + 1,
+            "deletions",
+          );
+        for (let index = 0; index < content.additions; index++)
+          addLine(
+            diff.additionLines[content.additionLineIndex + index],
+            content.additionLineIndex + index + 1,
+            "additions",
+          );
+      }
+    }
+    deletionCursor = hunk.deletionLineIndex + hunk.deletionCount;
+    additionCursor = hunk.additionLineIndex + hunk.additionCount;
+  }
+  if (expanded) {
+    context(
+      deletionCursor,
+      additionCursor,
+      Math.min(
+        diff.deletionLines.length - deletionCursor,
+        diff.additionLines.length - additionCursor,
+      ),
+    );
+  }
+  return matches;
+}
+
 type Shortcut = {
   keys: string[];
   label: string;
@@ -106,6 +193,7 @@ type Shortcut = {
 };
 const shortcuts: Shortcut[] = [
   { keys: ["?"], label: "Show keyboard shortcuts", category: "General" },
+  { keys: ["⌘/Ctrl", "F"], label: "Find in viewed file", category: "Navigate" },
   { keys: ["F"], label: "Find a file", category: "Navigate" },
   { keys: ["/"], label: "Search files", category: "Navigate" },
   { keys: ["J"], label: "Next file", category: "Navigate" },
@@ -1355,6 +1443,9 @@ function Review({
   const [copyError, setCopyError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showTextSearch, setShowTextSearch] = useState(false);
+  const [textSearch, setTextSearch] = useState("");
+  const [activeTextMatch, setActiveTextMatch] = useState(0);
   const [reviewPickerRequest, setReviewPickerRequest] = useState(0);
   const [showFinder, setShowFinder] = useState(false);
   const [showLinePicker, setShowLinePicker] = useState(false);
@@ -1370,6 +1461,7 @@ function Review({
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const viewerContainer = useRef<HTMLDivElement>(null);
+  const textSearchInput = useRef<HTMLInputElement>(null);
   const interactionVersion = useRef(0);
   const viewerFocusRequest = useRef<number | null>(null);
   const viewerScrollKey = JSON.stringify(["viewer", contentKey, viewerMode]);
@@ -1739,6 +1831,44 @@ function Review({
     }
     return diff;
   }, [content, contentKey, diffView, notice]);
+  const textMatches = useMemo(
+    () => textSearchMatches(
+      textSearch,
+      fileSource || null,
+      fileDiff,
+      split,
+      expandedDiff === contentKey,
+    ),
+    [textSearch, fileSource, fileDiff, split, expandedDiff, contentKey],
+  );
+  const currentTextMatch = textMatches[activeTextMatch];
+  useEffect(
+    () => setActiveTextMatch(0),
+    [textSearch, contentKey, viewerMode, split, expandedDiff],
+  );
+  useEffect(() => {
+    if (!showTextSearch || !currentTextMatch || !viewer.current) return;
+    viewer.current.scrollTo({
+      type: "line",
+      id: selected,
+      lineNumber: currentTextMatch.line,
+      side: currentTextMatch.side,
+      align: "center",
+    });
+  }, [showTextSearch, currentTextMatch, selected]);
+  const moveTextMatch = (offset: number) => {
+    if (!textMatches.length) return;
+    setActiveTextMatch((current) =>
+      (current + offset + textMatches.length) % textMatches.length,
+    );
+  };
+  const openTextSearch = () => {
+    setShowTextSearch(true);
+    requestAnimationFrame(() => {
+      textSearchInput.current?.focus();
+      textSearchInput.current?.select();
+    });
+  };
   const annotations = comments.filter(matchesView).map((comment) => ({
     lineNumber: comment.end,
     side:
@@ -1789,6 +1919,13 @@ function Review({
   const viewerRange = highlightedRange && !diffView
     ? { start: highlightedRange.start, end: highlightedRange.end }
     : highlightedRange;
+  const textSearchRange = showTextSearch && currentTextMatch
+    ? {
+        start: currentTextMatch.line,
+        end: currentTextMatch.line,
+        ...(diffView && currentTextMatch.side ? { side: currentTextMatch.side } : {}),
+      }
+    : null;
   const sidebarAdditions = entries.reduce(
     (sum, entry) => sum + (entry.additions || 0),
     0,
@@ -2170,8 +2307,22 @@ function Review({
       const typing = target.matches("input, textarea, select, [contenteditable=true]");
       const modifier = event.metaKey || event.ctrlKey || event.altKey;
 
+      if (
+        event.key.toLowerCase() === "f" &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        openTextSearch();
+        return;
+      }
+
       if (event.key === "Escape") {
-        if (showShortcuts || showFinder || showLinePicker || showPrompt) {
+        if (showTextSearch) {
+          event.preventDefault();
+          setShowTextSearch(false);
+          focusViewer();
+        } else if (showShortcuts || showFinder || showLinePicker || showPrompt) {
           event.preventDefault();
           setShowShortcuts(false);
           setShowFinder(false);
@@ -2564,6 +2715,51 @@ function Review({
           })}
         </aside>
         <main className="main">
+          {showTextSearch && (
+            <div className="text-search" role="search">
+              <input
+                ref={textSearchInput}
+                aria-label="Find in viewed file"
+                placeholder="Find"
+                value={textSearch}
+                onChange={(event) => setTextSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    moveTextMatch(event.shiftKey ? -1 : 1);
+                  }
+                }}
+              />
+              <span aria-live="polite">
+                {textSearch
+                  ? `${textMatches.length ? activeTextMatch + 1 : 0}/${textMatches.length}`
+                  : "0/0"}
+              </span>
+              <button
+                aria-label="Previous match"
+                disabled={!textMatches.length}
+                onClick={() => moveTextMatch(-1)}
+              >
+                ↑
+              </button>
+              <button
+                aria-label="Next match"
+                disabled={!textMatches.length}
+                onClick={() => moveTextMatch(1)}
+              >
+                ↓
+              </button>
+              <button
+                aria-label="Close find"
+                onClick={() => {
+                  setShowTextSearch(false);
+                  focusViewer();
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div className="file-heading">
             <a
               className="file-path"
@@ -2723,8 +2919,8 @@ function Review({
                   items={items}
                   options={options}
                   selectedLines={
-                    viewerRange
-                      ? { id: selected, range: viewerRange }
+                    textSearchRange || viewerRange
+                      ? { id: selected, range: textSearchRange || viewerRange! }
                       : null
                   }
                   onSelectedLinesChange={(selection) =>
