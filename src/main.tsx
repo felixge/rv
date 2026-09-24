@@ -54,6 +54,7 @@ type Comment = {
   start: number;
   end: number;
   text: string;
+  general?: boolean;
   side?: string;
   context: string;
   comparison?: Comparison;
@@ -1504,6 +1505,7 @@ function Review({
   const [expanded, setExpanded] = useState(saved.expanded);
   const [range, setRange] = useState<SelectedLineRange | null>(null);
   const [draft, setDraft] = useState("");
+  const [generalDraft, setGeneralDraft] = useState("");
   const [editing, setEditing] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
@@ -1880,6 +1882,7 @@ function Review({
 
   function matchesScope(comment: Comment) {
     return (
+      !comment.general &&
       (tab === "files"
         ? comment.context === "File"
         : comment.comparison
@@ -2375,6 +2378,22 @@ function Review({
     setCopied(false);
   }
 
+  function saveGeneralComment() {
+    if (!generalDraft.trim()) return;
+    setSubmitted(false);
+    setComments((items) => [...items, {
+      id: crypto.randomUUID(),
+      path: "",
+      start: 0,
+      end: 0,
+      text: generalDraft.trim(),
+      general: true,
+      context: "General",
+    }]);
+    setGeneralDraft("");
+    setCopied(false);
+  }
+
   async function copyPrompt() {
     setCopyError("");
     // Synchronous copy also works when the async clipboard API is blocked by
@@ -2417,6 +2436,7 @@ function Review({
       if (!response.ok) throw new Error((await response.json()).error);
       setComments([]);
       setDraft("");
+      setGeneralDraft("");
       setEditing(undefined);
       setRange(null);
       setHighlight(null);
@@ -2469,6 +2489,7 @@ function Review({
     reviewHistory.current = [];
     setEditing(undefined);
     setDraft("");
+    setGeneralDraft("");
     setRange(null);
     setHighlight(null);
     setPendingComment(null);
@@ -3375,6 +3396,35 @@ function Review({
               Preview
             </button>
           </div>
+          <form
+            className="general-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveGeneralComment();
+            }}
+          >
+            <label htmlFor="general-comment-text">General comment</label>
+            <textarea
+              id="general-comment-text"
+              placeholder="Add feedback not tied to a file…"
+              value={generalDraft}
+              onChange={(event) => setGeneralDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  (event.metaKey || event.ctrlKey) &&
+                  event.key === "Enter"
+                ) {
+                  event.preventDefault();
+                  saveGeneralComment();
+                }
+              }}
+            />
+            <div className="composer-actions">
+              <button className="primary" disabled={!generalDraft.trim()}>
+                Add general comment
+              </button>
+            </div>
+          </form>
           <div className="comments-body">
             {copyError && (
               <p role="alert" className="error">
@@ -3403,25 +3453,23 @@ function Review({
             )}
             {comments.map((comment, index) => (
               <article
-                className={`comment${highlight?.id === comment.id ? " highlighted" : ""}`}
+                className={`comment${comment.general ? " general" : ""}${highlight?.id === comment.id ? " highlighted" : ""}`}
                 key={comment.id}
                 id={`comment-${comment.id}`}
-                tabIndex={0}
-                aria-label={`Comment on ${reference(comment)}`}
-                onMouseEnter={() => setHighlight(comment)}
-                onMouseLeave={() => setHighlight(null)}
-                onFocus={() => setHighlight(comment)}
+                tabIndex={comment.general ? undefined : 0}
+                aria-label={comment.general ? "General comment" : `Comment on ${reference(comment)}`}
+                onMouseEnter={() => !comment.general && setHighlight(comment)}
+                onMouseLeave={() => !comment.general && setHighlight(null)}
+                onFocus={() => !comment.general && setHighlight(comment)}
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget))
                     setHighlight(null);
                 }}
-                onClick={(event) => {
-                  if (
-                    !(event.target as HTMLElement).closest("button, textarea")
-                  )
+                onClick={comment.general ? undefined : (event) => {
+                  if (!(event.target as HTMLElement).closest("button, textarea"))
                     void openComment(comment);
                 }}
-                onKeyDown={(event) => {
+                onKeyDown={comment.general ? undefined : (event) => {
                   if (
                     event.target === event.currentTarget &&
                     (event.key === "Enter" || event.key === " ")

@@ -1,4 +1,5 @@
 export function reference(comment) {
+  if (comment.general) return "General comment";
   const path = comment.commit
     ? `commit:${comment.commit}:message`
     : comment.path;
@@ -7,6 +8,8 @@ export function reference(comment) {
 
 export function formatPrompt(comments) {
   return comments
-    .map((comment) => `${reference(comment)}\n${comment.text.trim()}`)
+    .map((comment) => comment.general
+      ? comment.text.trim()
+      : `${reference(comment)}\n${comment.text.trim()}`)
     .join("\n\n");
 }

@@ -320,8 +320,12 @@ test("prompt contains only exact file:line references and associated comments", 
         text: "Explain why.",
         context: "not exported",
       },
+      {
+        general: true,
+        text: "Run the full test suite before handing this back.",
+      },
     ]),
-    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.",
+    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nRun the full test suite before handing this back.",
   );
   assert.equal(formatPrompt([]), "");
 });
