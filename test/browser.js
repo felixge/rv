@@ -659,6 +659,13 @@ try {
   );
   await click("Split");
   await wait(`${shadow}?.querySelector('[data-diff-type="split"]')`);
+  const splitContentWidths = await evaluate(
+    `Array.from(${shadow}.querySelectorAll('[data-content]')).slice(0, 2).map(element => element.getBoundingClientRect().width)`,
+  );
+  assert.ok(
+    Math.abs(splitContentWidths[0] - splitContentWidths[1]) < 1,
+    `Comment annotations must not collapse a wrapped split diff column: ${splitContentWidths}`,
+  );
   await capture("working-split");
   await browser("hover", ".comment:nth-child(2)");
   assert.deepEqual(await highlightedLines(), [14]);
