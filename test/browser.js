@@ -1220,21 +1220,47 @@ try {
       (_, i) => `export const line${i + 1} = ${i + 1};`,
     ).join("\n") + "\n",
   );
+  await Promise.all(Array.from({ length: 60 }, (_, i) =>
+    f.write(`tree/file-${String(i + 1).padStart(2, "0")}.ts`, `export const value = ${i + 1};\n`),
+  ));
   f.git("add", ".");
   f.git("commit", "-qm", "Clean checkpoint");
   await browser("reload");
   await wait(
     "document.querySelector('.sidebar-header')?.textContent.includes('Repository files')",
   );
-  await tree("long.ts");
+  await browser("press", "f");
+  await browser("fill", '[aria-label="Fuzzy find file"]', "long.ts");
+  await browser("press", "Enter");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
   await wait("document.activeElement === document.querySelector('.code-view')");
   await browser("press", "ArrowDown");
   await wait("document.querySelector('.code-view').scrollTop > 0");
   console.log("PASS selecting a file focuses its viewer for arrow-key scrolling");
-  await evaluate(
-    `document.querySelector('.code-view').scrollTop = 150 * parseFloat(getComputedStyle(${shadow}.querySelector('[data-column-number="1"]')).lineHeight)`,
-  );
+  await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  const explorerScroller = "document.querySelector('section[aria-label=\"Unreviewed\"] file-tree-container').shadowRoot.querySelector('[data-file-tree-virtualized-scroll=\"true\"]')";
+  await evaluate(`${explorerScroller}.scrollTop = ${explorerScroller}.scrollHeight`);
+  await evaluate("document.querySelector('.code-view').scrollTop = 1200");
+  await wait(`${explorerScroller}.scrollTop > 0 && document.querySelector('.code-view').scrollTop === 1200`);
+  const longURL = await evaluate("location.href");
+  assert.equal(new URL(longURL).searchParams.has("scroll"), false);
+  await browser("click", "a.file-path", "--new-tab");
+  const scrollTab = (await browser("tab", "list")).tabs.find((tab) => tab.tabId !== originalTab);
+  await browser("tab", scrollTab.tabId);
+  await wait("document.querySelector('.file-path')?.textContent === 'long.ts' && document.querySelector('.code-view')?.scrollTop === 1200");
+  assert.ok(await evaluate(`${explorerScroller}.scrollTop > 0`));
+  assert.equal(await evaluate("location.href"), longURL);
+  await browser("tab", "close", scrollTab.tabId);
+  await browser("tab", originalTab);
+  await tree("README.md");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('A small, predictable shipping calculator.')`);
+  await browser("press", "f");
+  await browser("fill", '[aria-label="Fuzzy find file"]', "long.ts");
+  await browser("press", "Enter");
+  await wait("document.querySelector('.code-view').scrollTop === 1200");
+  console.log("PASS each file and the file explorer restore scroll positions; a same-view new tab inherits them without URL state");
+
+  await evaluate("document.querySelector('.code-view').scrollTop = 150 * 23");
   await line(160, "", 162);
   await browser("fill", "#comment-text", "Review this off-screen range.");
   await click("Add comment");
@@ -1256,6 +1282,51 @@ try {
   console.log(
     "PASS comment click scrolls to lines 160–162, including navigation from another file",
   );
+  await f.write(
+    "long.ts",
+    Array.from(
+      { length: 240 },
+      (_, i) => `export const changedLine${i + 1} = ${i + 1};`,
+    ).join("\n") + "\n",
+  );
+  await browser("click", ".refresh");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')");
+  await reviewScope("Uncommitted changes");
+  await browser("press", "f");
+  await browser("fill", '[aria-label="Fuzzy find file"]', "long.ts");
+  await browser("press", "Enter");
+  await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
+  await evaluate("document.querySelector('.code-view').scrollTop = 700");
+  await browser("click", '[aria-label="View old"]');
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
+  await evaluate("document.querySelector('.code-view').scrollTop = 1000");
+  await browser("click", '[aria-label="View new"]');
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const changedLine1 = 1;')`);
+  await evaluate("document.querySelector('.code-view').scrollTop = 1300");
+  await browser("click", '[aria-label="View old"]');
+  await wait("document.querySelector('.code-view').scrollTop === 1000");
+  await browser("click", '[aria-label="View diff"]');
+  await wait("document.querySelector('.code-view').scrollTop === 700");
+  await browser("click", '[aria-label="View new"]');
+  await wait("document.querySelector('.code-view').scrollTop === 1300");
+  await browser("click", '[aria-label="View new"]', "--new-tab");
+  const modeScrollTab = (await browser("tab", "list")).tabs.find((tab) => tab.tabId !== originalTab);
+  await browser("tab", modeScrollTab.tabId);
+  await wait("document.querySelector('.file-path')?.textContent === 'long.ts' && document.querySelector('[aria-label=\"View new\"]')?.getAttribute('aria-current') === 'true'");
+  await wait("document.querySelector('.code-view').scrollTop === 1300");
+  assert.deepEqual(
+    await evaluate("Array.from(new URL(location.href).searchParams.keys()).sort()"),
+    ["mode", "path", "view"],
+  );
+  await browser("tab", "close", modeScrollTab.tabId);
+  await browser("tab", originalTab);
+  await browser("click", '[aria-label="View diff"]');
+  await wait("document.querySelector('[aria-label=\"View diff\"]')?.getAttribute('aria-current') === 'true'");
+  console.log("PASS Diff, Old and New keep independent scroll positions; the active view carries its position into a new tab");
+  f.git("checkout", "--", "long.ts");
+  await browser("click", ".refresh");
+  await wait("document.querySelector('[aria-label=\"Review scope\"]')");
+  await reviewScope("File Browser");
   await reviewScope("Uncommitted changes");
   await wait(
     "document.querySelector('main').textContent.includes('No changes to review')",
@@ -1289,8 +1360,10 @@ try {
     `${shadow}?.querySelector('pre')?.textContent.includes('pending = true')`,
   );
   await reviewScope("File Browser");
-  await tree("long.ts");
-  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
+  await browser("press", "f");
+  await browser("fill", '[aria-label="Fuzzy find file"]', "long.ts");
+  await browser("press", "Enter");
+  await wait("document.querySelector('.file-path')?.textContent === 'long.ts'");
   await browser("focus", '[aria-label="Review scope"]');
   const infoBeforeGf = await evaluate(
     "performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length",
@@ -1694,7 +1767,9 @@ try {
   await waitState((state) => state.comments.length === 1);
   await browser("tab", originalTab);
   assert.deepEqual(await comments(), []); // This tab still has its older snapshot.
-  await tree("README.md");
+  await browser("press", "f");
+  await browser("fill", '[aria-label="Fuzzy find file"]', "README.md");
+  await browser("press", "Enter");
   await click("Wrap long lines");
   const savedWrap = await evaluate("document.querySelector('[aria-label=\"Wrap long lines\"]').getAttribute('aria-pressed') === 'true'");
   const preserved = await waitState((state) => state.view.wrap === savedWrap);

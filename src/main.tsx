@@ -66,6 +66,38 @@ type SavedState = {
   reviewed?: Record<string, string[]>;
   comments?: Comment[];
 };
+type ScrollPosition = { top: number; left: number };
+
+const scrollStores = new Map<string, Record<string, ScrollPosition>>();
+function scrollStore(root: string) {
+  let positions = scrollStores.get(root);
+  if (positions) return positions;
+  try {
+    positions = JSON.parse(localStorage.getItem(`rv:scroll:${root}`) || "{}") as
+      Record<string, ScrollPosition>;
+  } catch {
+    positions = {};
+  }
+  scrollStores.set(root, positions);
+  return positions;
+}
+
+function rememberScroll(root: string, key: string, element: HTMLElement) {
+  const positions = scrollStore(root);
+  positions[key] = { top: element.scrollTop, left: element.scrollLeft };
+  try {
+    // Shared browser storage lets a modified click inherit the current position
+    // immediately without exposing it in the URL or waiting for a server write.
+    localStorage.setItem(`rv:scroll:${root}`, JSON.stringify(positions));
+  } catch {
+    // Scroll restoration is best-effort when browser storage is unavailable.
+  }
+}
+
+function restoreScroll(root: string, key: string, element: HTMLElement) {
+  const position = scrollStore(root)[key];
+  if (position) element.scrollTo(position.left, position.top);
+}
 
 type Shortcut = {
   keys: string[];
@@ -495,6 +527,8 @@ function BrowserTree({
   selected,
   onSelect,
   fileHref,
+  scrollRoot,
+  scrollKey,
   reviewed,
   onToggleReviewed,
   onToggleDirectoryReviewed,
@@ -507,6 +541,8 @@ function BrowserTree({
   selected: string;
   onSelect: (path: string) => void;
   fileHref: (path: string) => string;
+  scrollRoot: string;
+  scrollKey: string;
   reviewed: boolean;
   onToggleReviewed: (path: string) => void;
   onToggleDirectoryReviewed: (directory: string) => void;
@@ -642,6 +678,25 @@ function BrowserTree({
       host?.removeEventListener("auxclick", openTab, true);
     };
   }, [model]);
+  useEffect(() => {
+    let scroller: HTMLElement | null | undefined;
+    const frame = requestAnimationFrame(() => {
+      scroller = model.getFileTreeContainer()?.shadowRoot?.querySelector(
+        '[data-file-tree-virtualized-scroll="true"]',
+      );
+      if (!scroller) return;
+      restoreScroll(scrollRoot, scrollKey, scroller);
+      scroller.addEventListener("scroll", save, { passive: true });
+    });
+    const save = () => {
+      if (scroller) rememberScroll(scrollRoot, scrollKey, scroller);
+    };
+    return () => {
+      cancelAnimationFrame(frame);
+      save();
+      scroller?.removeEventListener("scroll", save);
+    };
+  }, [model, scrollRoot, scrollKey]);
   useEffect(() => {
     let observer: MutationObserver | undefined;
     const frame = requestAnimationFrame(() => {
@@ -1315,6 +1370,10 @@ function Review({
   const viewerContainer = useRef<HTMLDivElement>(null);
   const interactionVersion = useRef(0);
   const viewerFocusRequest = useRef<number | null>(null);
+  const viewerScrollKey = JSON.stringify(["viewer", contentKey, viewerMode]);
+  const activeViewerScrollKey = useRef(viewerScrollKey);
+  activeViewerScrollKey.current = viewerScrollKey;
+  const explicitViewerScrollKey = useRef("");
   const comparisonRequest = useRef(0);
   const viewRefresh = useRef(0);
   const latestCommitPending = useRef(false);
@@ -1753,8 +1812,58 @@ function Review({
   }, [content, loading, comparing, restoring, items.length, focusViewer]);
 
   useEffect(() => {
+    const scrollKey = viewerScrollKey;
+    let scroller: HTMLElement | null = null;
+    const save = () => {
+      if (scroller && activeViewerScrollKey.current === scrollKey)
+        rememberScroll(info.root, scrollKey, scroller);
+    };
+    // Explicit comment navigation owns the destination; ordinary file and mode
+    // navigation returns to the last position for that exact rendered view.
+    const position = scrollStore(info.root)[scrollKey];
+    const restoreInteraction = interactionVersion.current;
+    let frame = 0;
+    let listening = false;
+    let attempts = 0;
+    const restore = () => {
+      scroller ||= viewerContainer.current;
+      if (!scroller) {
+        if (attempts++ < 120) frame = requestAnimationFrame(restore);
+        return;
+      }
+      // Syntax highlighting can finish after mount. Wait until the virtualized
+      // content is tall enough instead of letting the browser clamp the saved
+      // position to zero before those lines exist.
+      if (
+        position &&
+        scroller.scrollHeight - scroller.clientHeight < position.top &&
+        attempts++ < 120
+      ) {
+        frame = requestAnimationFrame(restore);
+        return;
+      }
+      if (interactionVersion.current !== restoreInteraction) {
+        // Never override scrolling or focus movement performed while the
+        // virtualized content was still finishing its initial render.
+      } else if (explicitViewerScrollKey.current === scrollKey)
+        explicitViewerScrollKey.current = "";
+      else restoreScroll(info.root, scrollKey, scroller);
+      scroller.addEventListener("scroll", save, { passive: true });
+      listening = true;
+    };
+    frame = requestAnimationFrame(restore);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (listening && scroller) {
+        scroller.removeEventListener("scroll", save);
+      }
+    };
+  }, [info.root, viewerScrollKey, content]);
+
+  useEffect(() => {
     if (!pendingComment || loading || comparing || !content || !viewer.current)
       return;
+    explicitViewerScrollKey.current = viewerScrollKey;
     viewer.current.scrollTo({
       type: "range",
       id: pendingComment.path,
@@ -1762,7 +1871,7 @@ function Review({
       align: "center",
     });
     setPendingComment(null);
-  }, [pendingComment, content, loading, comparing, viewerMode]);
+  }, [pendingComment, content, loading, comparing, viewerMode, viewerScrollKey]);
 
   async function openComment(comment: Comment) {
     const id = ++comparisonRequest.current;
@@ -2419,6 +2528,8 @@ function Review({
                     selected={groupPaths.includes(selected) ? selected : ""}
                     onSelect={select}
                     fileHref={fileHref}
+                    scrollRoot={info.root}
+                    scrollKey={JSON.stringify(["explorer", reviewScope, done])}
                     reviewed={done}
                     onToggleReviewed={togglePathReviewed}
                     onToggleDirectoryReviewed={toggleDirectoryReviewed}
