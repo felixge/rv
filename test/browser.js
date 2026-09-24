@@ -488,7 +488,7 @@ try {
     const field = document.querySelector('.search');
     return { outer: getComputedStyle(field).outlineStyle, inner: getComputedStyle(field.querySelector('input')).outlineStyle };
   })()`),
-    { outer: "solid", inner: "none" },
+    { outer: "none", inner: "none" },
   );
   await browser("fill", '[aria-label="Find a file"]', "shipping");
   await tree("shipping.ts");
@@ -1164,7 +1164,7 @@ try {
   );
   assert.match(await codeText(), /const baseRate = 5/);
   console.log(
-    "PASS full-field search focus ring; range pickers browse/search by message/hash, keyboard and custom Git refs",
+    "PASS borderless file filter focus; range pickers browse/search by message/hash, keyboard and custom Git refs",
   );
   await line(7, "change-deletion");
   assert.equal(

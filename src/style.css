@@ -557,10 +557,6 @@ button.panel-toggle:hover {
   padding: 7px;
   font-size: 11px;
 }
-.search:focus-within {
-  outline: 2px solid #86b7e9;
-  outline-offset: 2px;
-}
 .search input:focus-visible {
   outline: none;
 }
