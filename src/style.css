@@ -94,15 +94,6 @@ code {
   position: relative;
   z-index: 6;
 }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.7px;
-  color: #242d39;
-}
 .brand-mark {
   background: #e9f1fc;
   color: #176dc0;
@@ -115,18 +106,17 @@ code {
   letter-spacing: -3px;
   padding-right: 10px;
 }
-.divider {
-  height: 20px;
-  width: 1px;
-  background: var(--border);
-  margin: 0 3px;
-}
 .repo-name {
   font-size: 13px;
   font-weight: 600;
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 4px 8px;
+  color: hsl(var(--repo-hue) 42% 30%);
+  background: hsl(var(--repo-hue) 55% 94%);
+  border: 1px solid hsl(var(--repo-hue) 45% 84%);
+  border-radius: 4px;
 }
 .branch {
   font:

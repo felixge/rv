@@ -234,6 +234,32 @@ try {
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");
 
+  const repoName = path.basename(f.root);
+  let repoNameHash = 0;
+  for (const character of repoName)
+    repoNameHash = Math.imul(repoNameHash, 31) + character.codePointAt(0);
+  assert.deepEqual(
+    await evaluate(`(() => {
+      const label = document.querySelector('.repo-name');
+      const style = getComputedStyle(label);
+      return {
+        name: label.textContent,
+        title: label.title,
+        hue: style.getPropertyValue('--repo-hue').trim(),
+        colored: style.backgroundColor !== 'rgba(0, 0, 0, 0)',
+        branch: document.querySelector('.branch')?.textContent,
+      };
+    })()`),
+    {
+      name: repoName,
+      title: f.root,
+      hue: String((repoNameHash >>> 0) % 360),
+      colored: true,
+      branch: "⑂ main",
+    },
+  );
+  console.log("PASS top bar identifies the repository and branch with a name-derived color");
+
   // A modified click opens the exact file/scope without navigating its source.
   // Check actual tabs and rendered contents, not just a mocked window.open.
   const originalTab = (await browser("tab", "list")).tabs[0].tabId;
@@ -1147,7 +1173,7 @@ try {
   );
   await reviewRange();
   await click("Target revision");
-  await browser("click", ".brand");
+  await browser("click", ".repo-name");
   assert.equal(
     await evaluate("Boolean(document.querySelector('.commit-popover'))"),
     false,

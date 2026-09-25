@@ -70,6 +70,13 @@ type TextSearchMatch = {
 };
 const textSearchHighlightName = "rv-text-search";
 const textSearchMatchesHighlightName = "rv-text-search-matches";
+function nameHue(name: string) {
+  let hash = 0;
+  for (const character of name) {
+    hash = Math.imul(hash, 31) + character.codePointAt(0)!;
+  }
+  return (hash >>> 0) % 360;
+}
 // The server-side disk cache, loaded once and saved back debounced.
 type SavedState = {
   view?: Record<string, unknown>;
@@ -2788,11 +2795,11 @@ function Review({
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">r/</span>rv
-        </div>
-        <span className="divider" />
-        <span className="repo-name" title={info.root}>
+        <span
+          className="repo-name"
+          title={info.root}
+          style={{ "--repo-hue": nameHue(info.name) } as CSSProperties}
+        >
           {info.name}
         </span>
         {info.branch && <span className="branch">⑂ {info.branch}</span>}
