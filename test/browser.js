@@ -1733,7 +1733,7 @@ try {
   await click("Mark reviewed");
   assert.match(await reviewedText(), /Commit message/);
   assert.match(await reviewedText(), /shipping.ts/);
-  assert.equal(await lineStats(), "6 lines added, 1 lines removed");
+  assert.equal(await lineStats(), "5 lines added, 0 lines removed");
   assert.equal(await lineStats("Reviewed"), "1 lines added, 1 lines removed");
   await browser("fill", '[aria-label="Find a file"]', "test/");
   assert.equal(await lineStats(), "5 lines added, 0 lines removed");

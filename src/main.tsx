@@ -2200,18 +2200,21 @@ function Review({
   const viewerRange = highlightedRange && !diffView
     ? { start: highlightedRange.start, end: highlightedRange.end }
     : highlightedRange;
-  const filteredEntries = entries.filter((entry) =>
-    filteredPaths.includes(entry.path),
+  const filteredUnreviewedPaths = unreviewedPaths.filter((path) =>
+    filteredPaths.includes(path),
   );
-  const sidebarAdditions = filteredEntries.reduce(
+  const filteredUnreviewedEntries = entries.filter((entry) =>
+    filteredUnreviewedPaths.includes(entry.path),
+  );
+  const sidebarAdditions = filteredUnreviewedEntries.reduce(
     (sum, entry) => sum + (entry.additions || 0),
     0,
   );
-  const sidebarDeletions = filteredEntries.reduce(
+  const sidebarDeletions = filteredUnreviewedEntries.reduce(
     (sum, entry) => sum + (entry.deletions || 0),
     0,
   );
-  const sidebarLines = filteredPaths.reduce(
+  const sidebarLines = filteredUnreviewedPaths.reduce(
     (sum, path) => sum + (info.lineCounts[path] || 0),
     0,
   );
