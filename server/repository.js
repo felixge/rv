@@ -20,11 +20,12 @@ export async function repository(directory) {
       })
     ).stdout;
   let isGit = true;
+  let gitRoot = root;
   try {
     // The opened directory is the review scope: git runs with -C root so
     // ls-files is limited to it and diff --relative limits and names diffs
     // relative to it. Commands like rev-parse and log still work repo-wide.
-    await git("rev-parse", "--show-toplevel");
+    gitRoot = (await git("rev-parse", "--show-toplevel")).trim();
   } catch {
     isGit = false;
   }
@@ -286,7 +287,7 @@ export async function repository(directory) {
     );
     return {
       root,
-      name: path.basename(root),
+      name: path.basename(gitRoot),
       isGit,
       branch,
       commits,

@@ -17,6 +17,7 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   const info = await repo.info();
   // Opening a subdirectory reviews only that directory, with scope-relative paths.
   assert.equal(repo.root, path.join(f.root, "src"));
+  assert.equal(info.name, path.basename(f.root));
   assert.deepEqual(info.files, ["discount.ts", "shipping.ts"]);
   await f.write("src/ignored/secret.txt", "not in the browser");
   assert.ok(!(await repo.info()).files.includes("ignored/secret.txt"));
