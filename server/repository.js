@@ -287,7 +287,10 @@ export async function repository(directory) {
     );
     return {
       root,
-      name: path.basename(gitRoot),
+      name: path.posix.join(
+        path.basename(gitRoot),
+        path.relative(gitRoot, root).split(path.sep).join("/"),
+      ),
       isGit,
       branch,
       commits,
