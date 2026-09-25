@@ -762,9 +762,14 @@ try {
   );
   await click("Copy Prompt 1");
   assert.equal(
-    await evaluate("Boolean(document.querySelector('[role=dialog]'))"),
-    false,
+    await evaluate("document.querySelector('[role=dialog] h2').textContent"),
+    "Prompt copied to clipboard",
   );
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Copied prompt\"]').value"),
+    "src/shipping.ts:6\nKeep the threshold at 100.",
+  );
+  await click("Keep Comments");
   await line(8);
   await browser("focus", "#comment-text");
   await browser("clipboard", "paste");
@@ -1549,9 +1554,14 @@ try {
   );
   await click("Copy Prompt 3");
   assert.equal(
-    await evaluate("Boolean(document.querySelector('[role=dialog]'))"),
-    false,
+    await evaluate("document.activeElement.textContent"),
+    "Clear",
   );
+  assert.equal(
+    await evaluate("document.querySelector('[aria-label=\"Copied prompt\"]').value"),
+    `src/shipping.ts:6\nMake the threshold configurable.\n\nsrc/shipping.ts:14\nKeep cents precise; round only when displaying the price.\n\ncommit:${f.second}:message:3-4\nExplain why international shipping costs more.`,
+  );
+  await click("Keep Comments");
   await line(1);
   await browser("clipboard", "paste");
   assert.equal(
@@ -2013,6 +2023,20 @@ try {
   assert.deepEqual((await otherSearchHighlights()).map(({ text }) => text), ["sideTarget"]);
   await capture("text-selection-diff");
   console.log("PASS selecting text in a diff highlights the selected side and the other match without opening find");
+
+  await browser("fill", 'textarea[placeholder="Add feedback not tied to a file…"]', "Verify the copied prompt modal.");
+  await click("Add general comment");
+  await browser("click", ".copy");
+  await wait("document.querySelector('[role=dialog] h2')?.textContent === 'Prompt copied to clipboard'");
+  assert.equal(await evaluate("document.activeElement.textContent"), "Clear");
+  assert.match(
+    await evaluate("document.querySelector('[aria-label=\"Copied prompt\"]').value"),
+    /Verify the copied prompt modal\./,
+  );
+  await browser("press", "Enter");
+  await wait("!document.querySelector('[role=dialog]') && document.querySelector('.copy').disabled");
+  assert.equal(await evaluate("document.querySelectorAll('.comment').length"), 0);
+  console.log("PASS copied prompt modal shows the prompt; Keep Comments preserves review state; Enter defaults to Clear");
 
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);

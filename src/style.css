@@ -1456,6 +1456,35 @@ kbd {
     monospace;
   color: #445266;
 }
+.copied-prompt-heading {
+  padding: 22px 24px 18px;
+}
+.copied-prompt-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.copied-prompt-heading h2 {
+  margin: 0;
+  color: #303b49;
+  font-size: 17px;
+}
+.copied-prompt-heading p {
+  margin: 4px 0 0;
+  color: #7b8796;
+  font-size: 11px;
+}
+.copied-prompt-check {
+  display: grid;
+  flex: 0 0 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e7f7ef;
+  color: #16824c;
+  font-size: 17px;
+  font-weight: 700;
+}
 .dialog-footer {
   border-top: 1px solid var(--border);
   display: flex;

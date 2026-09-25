@@ -1513,6 +1513,7 @@ function Review({
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showCopiedPrompt, setShowCopiedPrompt] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showTextSearch, setShowTextSearch] = useState(false);
   const [highlightSelectedText, setHighlightSelectedText] = useState(false);
@@ -2415,6 +2416,8 @@ function Review({
     try {
       if (!success) await navigator.clipboard.writeText(prompt);
       setCopied(true);
+      setShowPrompt(false);
+      setShowCopiedPrompt(true);
     } catch {
       setCopied(false);
       setCopyError(
@@ -2480,10 +2483,7 @@ function Review({
       );
   }
 
-  function clearReview() {
-    if (!window.confirm(
-      "Clear all comments and review progress? View settings will be kept. This cannot be undone.",
-    )) return;
+  function resetReview() {
     setComments([]);
     setReviewed({});
     reviewHistory.current = [];
@@ -2494,6 +2494,18 @@ function Review({
     setHighlight(null);
     setPendingComment(null);
     setCopied(false);
+  }
+
+  function clearReview() {
+    if (!window.confirm(
+      "Clear all comments and review progress? View settings will be kept. This cannot be undone.",
+    )) return;
+    resetReview();
+  }
+
+  function clearCopiedReview() {
+    setShowCopiedPrompt(false);
+    resetReview();
   }
 
   function togglePathReviewed(path: string, advance = false) {
@@ -2714,12 +2726,13 @@ function Review({
           event.preventDefault();
           setShowTextSearch(false);
           focusViewer();
-        } else if (showShortcuts || showFinder || showLinePicker || showPrompt) {
+        } else if (showShortcuts || showFinder || showLinePicker || showPrompt || showCopiedPrompt) {
           event.preventDefault();
           setShowShortcuts(false);
           setShowFinder(false);
           setShowLinePicker(false);
           setShowPrompt(false);
+          setShowCopiedPrompt(false);
         } else if (editing || range) {
           event.preventDefault();
           setEditing(undefined);
@@ -2728,7 +2741,7 @@ function Review({
         }
         return;
       }
-      if (typing || modifier || showShortcuts || showFinder || showLinePicker || showPrompt)
+      if (typing || modifier || showShortcuts || showFinder || showLinePicker || showPrompt || showCopiedPrompt)
         return;
 
       const key = event.key.toLowerCase();
@@ -3678,6 +3691,48 @@ function Review({
               </div>
             </div>
           </section>
+        </div>
+      )}
+      {showCopiedPrompt && (
+        <div className="modal-backdrop" onClick={() => setShowCopiedPrompt(false)}>
+          <form
+            className="prompt-dialog copied-prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="copied-prompt-title"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              clearCopiedReview();
+            }}
+          >
+            <div className="panel-heading copied-prompt-heading">
+              <div>
+                <span className="copied-prompt-check" aria-hidden="true">✓</span>
+                <div>
+                  <h2 id="copied-prompt-title">Prompt copied to clipboard</h2>
+                  <p>You can clear this review or keep the comments for later.</p>
+                </div>
+              </div>
+            </div>
+            <textarea
+              aria-label="Copied prompt"
+              readOnly
+              value={prompt}
+              onFocus={(event) => event.target.select()}
+            />
+            <div className="dialog-footer">
+              <span>Clear also resets review progress.</span>
+              <div className="dialog-actions">
+                <button type="button" onClick={() => setShowCopiedPrompt(false)}>
+                  Keep Comments
+                </button>
+                <button className="primary" type="submit" autoFocus>
+                  Clear
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       )}
       {showFinder && (
