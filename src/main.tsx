@@ -36,6 +36,7 @@ type Comparison = {
   message?: string;
 };
 const MESSAGE_PATH = "\0commit-message";
+const MESSAGE_TREE_PATH = "\uE000Commit message";
 type Source = { name: string; contents: string; notice?: string; cacheKey?: string } | null;
 type Info = {
   root: string;
@@ -284,10 +285,6 @@ function compareTreePaths(left: string, right: string) {
     return leftPart < rightPart ? -1 : 1;
   }
   return leftParts.length - rightParts.length;
-}
-
-function treeOrdered(paths: string[]) {
-  return [...paths].sort(compareTreePaths);
 }
 
 function fuzzyScore(path: string, query: string) {
@@ -689,7 +686,9 @@ function BrowserTree({
   paths,
   entries,
   selected,
+  includeMessage,
   onSelect,
+  onOrderChange,
   fileHref,
   scrollRoot,
   scrollKey,
@@ -703,7 +702,9 @@ function BrowserTree({
   paths: string[];
   entries: Entry[];
   selected: string;
+  includeMessage: boolean;
   onSelect: (path: string) => void;
+  onOrderChange: (paths: string[]) => void;
   fileHref: (path: string) => string;
   scrollRoot: string;
   scrollKey: string;
@@ -729,15 +730,25 @@ function BrowserTree({
   searchRef.current = search;
   const syncingSelection = useRef(false);
   const syncingExpansion = useRef(false);
+  const treePaths = useMemo(
+    () => includeMessage ? [MESSAGE_TREE_PATH, ...paths] : paths,
+    [includeMessage, paths],
+  );
   selectRef.current = (path) => {
-    if (paths.includes(path)) onSelect(path);
+    if (path === MESSAGE_TREE_PATH) onSelect(MESSAGE_PATH);
+    else if (treePaths.includes(path)) onSelect(path);
   };
   const { model } = useFileTree({
-    paths,
+    paths: treePaths,
+    sort: (left, right) =>
+      left.path === MESSAGE_TREE_PATH ? -1 : right.path === MESSAGE_TREE_PATH ? 1 :
+        compareTreePaths(left.path, right.path),
     initialExpansion: "open",
     density: "compact",
     icons: "standard",
-    initialSelectedPaths: selected ? [selected] : [],
+    initialSelectedPaths: selected
+      ? [selected === MESSAGE_PATH ? MESSAGE_TREE_PATH : selected]
+      : [],
     onSelectionChange: (items) => {
       if (syncingSelection.current) return;
       const item = items.at(-1);
@@ -750,7 +761,10 @@ function BrowserTree({
         buttonVisibility: "when-needed",
         onOpen: (item, context) => {
           context.close({ restoreFocus: false });
-          if (item.kind === "file") toggleReviewedRef.current(item.path);
+          if (item.kind === "file")
+            toggleReviewedRef.current(
+              item.path === MESSAGE_TREE_PATH ? MESSAGE_PATH : item.path,
+            );
           else if (item.kind === "directory")
             toggleDirectoryRef.current(item.path);
         },
@@ -772,6 +786,23 @@ function BrowserTree({
       status: statuses[entry.status] || "modified",
     })),
   });
+  useEffect(() => {
+    const updateOrder = () => {
+      onOrderChange(
+        model.getVisibleRows(0, model.getVisibleCount())
+          .filter((row) => row.kind === "file")
+          .map((row) =>
+            row.path === MESSAGE_TREE_PATH ? MESSAGE_PATH : row.path,
+          ),
+      );
+    };
+    const unsubscribe = model.subscribe(updateOrder);
+    updateOrder();
+    return () => {
+      unsubscribe();
+      onOrderChange([]);
+    };
+  }, [model, onOrderChange]);
   useEffect(() => {
     const directories = directoryPaths(paths);
     return model.subscribe(() => {
@@ -809,14 +840,15 @@ function BrowserTree({
     syncingExpansion.current = false;
   }, [model, search, collapsed]);
   useEffect(() => {
+    const treeSelected = selected === MESSAGE_PATH ? MESSAGE_TREE_PATH : selected;
     syncingSelection.current = true;
     for (const path of model.getSelectedPaths()) {
-      if (path !== selected) model.getItem(path)?.deselect();
+      if (path !== treeSelected) model.getItem(path)?.deselect();
     }
-    const item = model.getItem(selected);
+    const item = model.getItem(treeSelected);
     if (item && !item.isSelected()) item.select();
     syncingSelection.current = false;
-  }, [model, selected, paths]);
+  }, [model, selected, treePaths]);
   useEffect(() => {
     // Pierre renders rows as buttons, with no link renderer. Intercept before
     // its selection handler so opening a tab leaves this tab untouched.
@@ -827,6 +859,7 @@ function BrowserTree({
       const row = event.composedPath().find((node): node is HTMLElement =>
         node instanceof HTMLElement && node.dataset.type === "item");
       if (row?.dataset.itemType !== "file" || !row.dataset.itemPath) return;
+      if (row.dataset.itemPath === MESSAGE_TREE_PATH) return;
       event.preventDefault();
       event.stopPropagation();
       window.open(hrefRef.current(row.dataset.itemPath), "_blank", "noopener");
@@ -869,6 +902,15 @@ function BrowserTree({
       if (!host || !root) return;
       const label = reviewed ? "Mark unreviewed" : "Mark reviewed";
       const updateAction = () => {
+        const message = root.querySelector(
+          `[data-type="item"][data-item-path=${JSON.stringify(MESSAGE_TREE_PATH)}]`,
+        );
+        if (message) {
+          message.setAttribute("aria-label", "Commit message");
+          const content = message.querySelector('[data-item-section="content"]');
+          if (content && content.textContent !== "Commit message")
+            content.textContent = "Commit message";
+        }
         const hovered = root.querySelector(
           '[data-type="item"][data-item-context-hover="true"]',
         );
@@ -1560,6 +1602,13 @@ function Review({
     paths: string[];
     reviewed: boolean;
   }[]>([]);
+  const treeOrder = useRef<[string[], string[]]>([[], []]);
+  const setUnreviewedTreeOrder = useCallback((paths: string[]) => {
+    treeOrder.current[0] = paths;
+  }, []);
+  const setReviewedTreeOrder = useCallback((paths: string[]) => {
+    treeOrder.current[1] = paths;
+  }, []);
   useEffect(() => {
     const trackInteraction = () => interactionVersion.current++;
     const trackTypingFocus = (event: FocusEvent) => {
@@ -2580,25 +2629,8 @@ function Review({
     }
   }
 
-  const reviewItems = useMemo(() => {
-    const matchingUnreviewed = unreviewedPaths.filter((path) =>
-      filteredPaths.includes(path),
-    );
-    const matchingReviewed = reviewedPaths.filter((path) =>
-      filteredPaths.includes(path),
-    );
-    return [
-      ...(hasMessage && !messageReviewed && "commit message".includes(fileSearch)
-        ? [MESSAGE_PATH]
-        : []),
-      ...treeOrdered(matchingUnreviewed),
-      ...(hasMessage && messageReviewed && "commit message".includes(fileSearch)
-        ? [MESSAGE_PATH]
-        : []),
-      ...treeOrdered(matchingReviewed),
-    ];
-  }, [fileSearch, filteredPaths, hasMessage, messageReviewed, unreviewedPaths, reviewedPaths]);
   function moveFile(offset: number) {
+    const reviewItems = treeOrder.current.flat();
     if (!reviewItems.length) return;
     const current = reviewItems.indexOf(selected);
     const next = current < 0
@@ -2974,6 +3006,8 @@ function Review({
           {[false, true].map((done) => {
             if (done && !reviewedCount) return null;
             const groupPaths = done ? reviewedPaths : unreviewedPaths;
+            const includeMessage = hasMessage && messageReviewed === done &&
+              "commit message".includes(search.toLowerCase());
             const filteredGroupPaths = groupPaths.filter((path) =>
               filteredPaths.includes(path),
             );
@@ -3004,7 +3038,7 @@ function Review({
             return (
               <section
                 key={String(done)}
-                className={`file-section${groupPaths.length ? "" : " no-files"}`}
+                className={`file-section${groupPaths.length || includeMessage ? "" : " no-files"}`}
                 aria-label={done ? "Reviewed" : "Unreviewed"}
               >
                 {done && <div className="sidebar-caption">
@@ -3039,36 +3073,18 @@ function Review({
                     )}
                   </span>
                 </div>}
-                {hasMessage &&
-                  messageReviewed === done &&
-                  "commit message".includes(search.toLowerCase()) && (
-                    <button
-                      className={`message-nav${messageView ? " active" : ""}`}
-                      aria-pressed={messageView}
-                      onClick={() => select(MESSAGE_PATH)}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.25"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M9.5 1.5h-6v13h9v-10z M9.5 1.5v3h3 M5.5 7.5h5 M5.5 10.5h5" />
-                      </svg>
-                      Commit message
-                    </button>
-                  )}
-                {!!groupPaths.length && (
+                {(!!groupPaths.length || includeMessage) && (
                   <BrowserTree
                     key={`${reviewScope}:${JSON.stringify(groupPaths)}`}
                     paths={groupPaths}
                     entries={entries}
-                    selected={groupPaths.includes(selected) ? selected : ""}
+                    selected={groupPaths.includes(selected) ||
+                      includeMessage && selected === MESSAGE_PATH ? selected : ""}
+                    includeMessage={includeMessage}
                     onSelect={select}
+                    onOrderChange={done
+                      ? setReviewedTreeOrder
+                      : setUnreviewedTreeOrder}
                     fileHref={fileHref}
                     scrollRoot={info.root}
                     scrollKey={JSON.stringify(["explorer", reviewScope, done])}
@@ -3088,7 +3104,7 @@ function Review({
                 )}
                 {!done &&
                   !groupPaths.length &&
-                  !(hasMessage && !messageReviewed) && (
+                  !includeMessage && (
                     <p className="sidebar-empty">
                       {reviewedCount
                         ? "All reviewed."

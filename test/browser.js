@@ -1607,7 +1607,31 @@ try {
   await tree("shipping.ts");
   await wait(`${shadow}?.querySelector('[data-line-type="change-addition"]')`);
   await capture("commit-message-unselected");
-  await click("Commit message");
+  const unreviewedTree = "document.querySelector('section[aria-label=Unreviewed] file-tree-container')";
+  const unreviewedScroller = `${unreviewedTree}.shadowRoot.querySelector('[data-file-tree-virtualized-scroll=true]')`;
+  await wait(`${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]')`);
+  await evaluate(`${unreviewedTree}.style.flex = '0 0 60px'`);
+  await wait(`${unreviewedTree}.getBoundingClientRect().height === 60`);
+  await evaluate(`${unreviewedScroller}.scrollTop = ${unreviewedScroller}.scrollHeight`);
+  await wait(`(() => {
+    const scroller = ${unreviewedScroller};
+    const row = ${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]');
+    if (!row) return true;
+    const viewport = scroller.getBoundingClientRect();
+    const item = row.getBoundingClientRect();
+    return item.bottom <= viewport.top || item.top >= viewport.bottom || getComputedStyle(row).opacity === '0';
+  })()`);
+  await evaluate(`${unreviewedScroller}.scrollTop = 0`);
+  await wait(`(() => {
+    const scroller = ${unreviewedScroller};
+    const row = ${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]');
+    if (!row || getComputedStyle(row).opacity === '0') return false;
+    const viewport = scroller.getBoundingClientRect();
+    const item = row.getBoundingClientRect();
+    return item.top >= viewport.top && item.bottom <= viewport.bottom;
+  })()`);
+  await evaluate(`${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]').click()`);
+  await evaluate(`${unreviewedTree}.style.flex = ''`);
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Keep domestic shipping at 5.')`,
   );
@@ -1793,15 +1817,18 @@ try {
     "document.querySelector('section[aria-label=Reviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem]')",
   );
   assert.equal(
-    await evaluate("document.querySelectorAll('.message-nav').length"),
+    await evaluate("Array.from(document.querySelectorAll('file-tree-container')).filter(tree => tree.shadowRoot.querySelector('[role=treeitem][aria-label=\"Commit message\"]')).length"),
     0,
   );
   await tree("shipping.ts");
   await browser("focus", '[aria-label="Find a file"]');
   await browser("press", "Control+a");
   await browser("press", "Backspace");
-  await wait("document.querySelector('.message-nav')");
-  await click("Commit message");
+  await wait("Array.from(document.querySelectorAll('file-tree-container')).some(tree => tree.shadowRoot.querySelector('[role=treeitem][aria-label=\"Commit message\"]'))");
+  const reviewedTree = "document.querySelector('section[aria-label=Reviewed] file-tree-container')";
+  await evaluate(`${reviewedTree}.shadowRoot.querySelector('[data-file-tree-virtualized-scroll=true]').scrollTop = 0`);
+  await wait(`${reviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]')`);
+  await evaluate(`${reviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]').click()`);
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
   );
@@ -1830,7 +1857,7 @@ try {
   await browser("press", "Enter");
   await click("Compare");
   await wait(
-    "!document.querySelector('.message-nav') && !document.querySelector('.review-toggle').disabled",
+    "!Array.from(document.querySelectorAll('file-tree-container')).some(tree => tree.shadowRoot.querySelector('[role=treeitem][aria-label=\"Commit message\"]')) && !document.querySelector('.review-toggle').disabled",
   );
   assert.equal(await reviewedText(), "");
   await click("Mark reviewed");

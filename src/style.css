@@ -388,22 +388,6 @@ button.panel-toggle:hover {
   background: #e3e9f0;
   color: #125eaa;
 }
-.message-nav {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 12px 8px;
-  text-align: left;
-  background: transparent;
-  border-color: transparent;
-}
-.message-nav svg {
-  flex-shrink: 0;
-}
-.message-nav.active {
-  background: #e1edfa;
-  color: #125eaa;
-}
 .workspace > [hidden] {
   display: none;
 }
