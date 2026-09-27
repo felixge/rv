@@ -859,10 +859,12 @@ function BrowserTree({
       const row = event.composedPath().find((node): node is HTMLElement =>
         node instanceof HTMLElement && node.dataset.type === "item");
       if (row?.dataset.itemType !== "file" || !row.dataset.itemPath) return;
-      if (row.dataset.itemPath === MESSAGE_TREE_PATH) return;
       event.preventDefault();
       event.stopPropagation();
-      window.open(hrefRef.current(row.dataset.itemPath), "_blank", "noopener");
+      const path = row.dataset.itemPath === MESSAGE_TREE_PATH
+        ? MESSAGE_PATH
+        : row.dataset.itemPath;
+      window.open(hrefRef.current(path), "_blank", "noopener");
     };
     const frame = requestAnimationFrame(() => {
       host = model.getFileTreeContainer() || undefined;

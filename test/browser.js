@@ -309,6 +309,25 @@ try {
     assert.equal(await evaluate("location.href"), originalURL);
     assert.equal(await evaluate("document.querySelector('.file-path').textContent"), originalPath);
   }
+  await browser("open", `${url}/?mode=commit&to=${f.second}`);
+  await wait("document.querySelector('file-tree-container')?.shadowRoot?.querySelector('[aria-label=\"Commit message\"]')");
+  const messageSourceURL = await evaluate("location.href");
+  await evaluate(`document.querySelector('file-tree-container').shadowRoot
+    .querySelector('[aria-label="Commit message"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true,
+      cancelable: true, metaKey: true }))`);
+  const messageTabs = (await browser("tab", "list")).tabs;
+  assert.equal(messageTabs.length, 2);
+  const messageTab = messageTabs.find((tab) => tab.tabId !== originalTab);
+  await browser("tab", messageTab.tabId);
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`);
+  assert.match(await evaluate("document.querySelector('.file-path').textContent"), /Commit message/);
+  assert.equal(await evaluate("new URLSearchParams(location.search).get('path')"), "\0commit-message");
+  await browser("reload");
+  await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`);
+  await browser("tab", "close", messageTab.tabId);
+  await browser("tab", originalTab);
+  assert.equal(await evaluate("location.href"), messageSourceURL);
   await browser("open", `${url}/?mode=files&path=README.md`);
   await wait("document.querySelector('.file-tree')");
   await tree("shipping.ts");
@@ -331,7 +350,7 @@ try {
   await browser("open", url);
   await wait("document.querySelector('.file-tree')");
   assert.equal(await evaluate("document.querySelector('.file-path').hasAttribute('href')"), false);
-  console.log("PASS Cmd/Ctrl/middle-click preserves the source tab; new tabs and reload retain files, working/commit/range scopes; Back/Forward, finder and viewer header links work");
+  console.log("PASS Cmd/Ctrl/middle-click preserves the source tab; new tabs and reload retain files, commit messages, working/commit/range scopes; Back/Forward, finder and viewer header links work");
 
   await browser("open", `${url}/?mode=commit&to=${f.second}&path=src%2Fshipping.ts`);
   await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
@@ -1609,29 +1628,13 @@ try {
   await capture("commit-message-unselected");
   const unreviewedTree = "document.querySelector('section[aria-label=Unreviewed] file-tree-container')";
   const unreviewedScroller = `${unreviewedTree}.shadowRoot.querySelector('[data-file-tree-virtualized-scroll=true]')`;
-  await wait(`${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]')`);
-  await evaluate(`${unreviewedTree}.style.flex = '0 0 60px'`);
-  await wait(`${unreviewedTree}.getBoundingClientRect().height === 60`);
-  await evaluate(`${unreviewedScroller}.scrollTop = ${unreviewedScroller}.scrollHeight`);
-  await wait(`(() => {
-    const scroller = ${unreviewedScroller};
-    const row = ${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]');
-    if (!row) return true;
-    const viewport = scroller.getBoundingClientRect();
-    const item = row.getBoundingClientRect();
-    return item.bottom <= viewport.top || item.top >= viewport.bottom || getComputedStyle(row).opacity === '0';
-  })()`);
-  await evaluate(`${unreviewedScroller}.scrollTop = 0`);
-  await wait(`(() => {
-    const scroller = ${unreviewedScroller};
-    const row = ${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]');
-    if (!row || getComputedStyle(row).opacity === '0') return false;
-    const viewport = scroller.getBoundingClientRect();
-    const item = row.getBoundingClientRect();
-    return item.top >= viewport.top && item.bottom <= viewport.bottom;
-  })()`);
+  assert.equal(
+    await evaluate(`${unreviewedTree}.shadowRoot
+      .querySelector('[role=treeitem][aria-label="Commit message"]')
+      .closest('[data-file-tree-virtualized-scroll=true]') === ${unreviewedScroller}`),
+    true,
+  );
   await evaluate(`${unreviewedTree}.shadowRoot.querySelector('[role=treeitem][aria-label="Commit message"]').click()`);
-  await evaluate(`${unreviewedTree}.style.flex = ''`);
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Keep domestic shipping at 5.')`,
   );
