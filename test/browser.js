@@ -1703,6 +1703,18 @@ try {
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
   );
+  await browser("press", "f");
+  await browser("wait", '[aria-label="Fuzzy find file"]');
+  assert.deepEqual(
+    await evaluate("Array.from(document.querySelectorAll('.finder-results a')).map(e => ({ path: e.querySelector('.finder-path').textContent, state: e.querySelector('.finder-state').textContent.trim() }))"),
+    [{ path: "Commit message", state: "Unreviewed" }],
+  );
+  await capture("commit-message-finder");
+  await browser("fill", '[aria-label="Fuzzy find file"]', "message");
+  await browser("press", "Enter");
+  await wait(
+    `!document.querySelector('.file-finder') && ${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
+  );
   assert.match(
     await evaluate("document.querySelector('.sidebar-header').textContent"),
     /Changed files\s*1/,

@@ -323,13 +323,21 @@ function FileFinder({
   const [active, setActive] = useState(0);
   const matches = useMemo(
     () => paths
-      .map((path, order) => ({ path, order, score: fuzzyScore(path, query) }))
-      .filter((match): match is { path: string; order: number; score: number } =>
+      .map((path, order) => {
+        const label = path === MESSAGE_PATH ? "Commit message" : path;
+        return { path, label, order, score: fuzzyScore(label, query) };
+      })
+      .filter((match): match is {
+        path: string;
+        label: string;
+        order: number;
+        score: number;
+      } =>
         match.score !== null,
       )
       .sort((left, right) =>
         left.score - right.score ||
-        compareTreePaths(left.path, right.path) ||
+        compareTreePaths(left.label, right.label) ||
         left.order - right.order,
       )
       .slice(0, 100),
@@ -393,7 +401,7 @@ function FileFinder({
                   choose(match.path);
                 }}
               >
-                <span className="finder-path">{match.path}</span>
+                <span className="finder-path">{match.label}</span>
                 <span className={`finder-state${done ? " reviewed" : ""}`}>
                   {done ? "✓ Reviewed" : "Unreviewed"}
                 </span>
@@ -3765,7 +3773,7 @@ function Review({
       )}
       {showFinder && (
         <FileFinder
-          paths={paths}
+          paths={hasMessage ? [MESSAGE_PATH, ...paths] : paths}
           reviewed={reviewedInView || []}
           onSelect={select}
           fileHref={fileHref}
