@@ -1772,6 +1772,17 @@ try {
   await click("Mark reviewed");
   assert.match(await reviewedText(), /Commit message/);
   assert.match(await reviewedText(), /shipping.ts/);
+  // The message moves between trees even when their file lists stay the same.
+  await tree("Commit message");
+  await wait(
+    `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.') && !document.querySelector('.review-toggle').disabled`,
+  );
+  await click("Mark unreviewed");
+  assert.doesNotMatch(await reviewedText(), /Commit message/);
+  assert.match(await sectionText("Unreviewed"), /Commit message/);
+  await click("Mark reviewed");
+  assert.match(await reviewedText(), /Commit message/);
+  assert.doesNotMatch(await sectionText("Unreviewed"), /Commit message/);
   assert.equal(await lineStats(), "5 lines added, 0 lines removed");
   assert.equal(await lineStats("Reviewed"), "1 lines added, 1 lines removed");
   await browser("fill", '[aria-label="Find a file"]', "test/");

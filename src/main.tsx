@@ -3085,7 +3085,7 @@ function Review({
                 </div>}
                 {(!!groupPaths.length || includeMessage) && (
                   <BrowserTree
-                    key={`${reviewScope}:${JSON.stringify(groupPaths)}`}
+                    key={`${reviewScope}:${includeMessage}:${JSON.stringify(groupPaths)}`}
                     paths={groupPaths}
                     entries={entries}
                     selected={groupPaths.includes(selected) ||
