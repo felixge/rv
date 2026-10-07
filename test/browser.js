@@ -322,6 +322,7 @@ try {
   await browser("tab", messageTab.tabId);
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`);
   assert.match(await evaluate("document.querySelector('.file-path').textContent"), /Commit message/);
+  assert.equal(await evaluate("Boolean(document.querySelector('.copy-path'))"), false);
   assert.equal(await evaluate("new URLSearchParams(location.search).get('path')"), "\0commit-message");
   await browser("reload");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`);
@@ -829,6 +830,16 @@ try {
   console.log(
     "PASS real Copy Prompt clipboard contents, verified by paste-back",
   );
+
+  await click("Copy file path");
+  await browser("wait", '[aria-label="Copied file path"]');
+  await line(8);
+  await browser("focus", "#comment-text");
+  await browser("clipboard", "paste");
+  assert.equal(await evaluate("document.querySelector('#comment-text').value"), "src/shipping.ts");
+  await click("Cancel");
+  await browser("wait", '[aria-label="Copy file path"]');
+  console.log("PASS viewer header copies the file path, verified by paste-back");
 
   await reviewScope("Uncommitted changes");
   await wait(`${shadow}?.querySelector('[data-line-type="change-addition"]')`);

@@ -71,6 +71,25 @@ type TextSearchMatch = {
 };
 const textSearchHighlightName = "rv-text-search";
 const textSearchMatchesHighlightName = "rv-text-search-matches";
+// Synchronous copy also works when the async clipboard API is blocked by
+// an embedding page's permissions policy. Throws if both methods fail.
+async function copyText(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.cssText = "position:fixed;left:-9999px;top:0";
+  document.body.append(textarea);
+  const focused = document.activeElement as HTMLElement | null;
+  textarea.select();
+  let success = false;
+  try {
+    success = document.execCommand("copy");
+  } catch {
+    /* Try Clipboard API below. */
+  }
+  textarea.remove();
+  focused?.focus({ preventScroll: true });
+  if (!success) await navigator.clipboard.writeText(text);
+}
 function nameHue(name: string) {
   let hash = 0;
   for (const character of name) {
@@ -1568,6 +1587,7 @@ function Review({
   const [editing, setEditing] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
+  const [copiedPath, setCopiedPath] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -2466,24 +2486,9 @@ function Review({
 
   async function copyPrompt() {
     setCopyError("");
-    // Synchronous copy also works when the async clipboard API is blocked by
-    // an embedding page's permissions policy. Never open a dialog on failure.
-    const textarea = document.createElement("textarea");
-    textarea.value = prompt;
-    textarea.style.cssText = "position:fixed;left:-9999px;top:0";
-    document.body.append(textarea);
-    const focused = document.activeElement as HTMLElement | null;
-    textarea.select();
-    let success = false;
+    // Never open a dialog on failure.
     try {
-      success = document.execCommand("copy");
-    } catch {
-      /* Try Clipboard API below. */
-    }
-    textarea.remove();
-    focused?.focus({ preventScroll: true });
-    try {
-      if (!success) await navigator.clipboard.writeText(prompt);
+      await copyText(prompt);
       setCopied(true);
       setShowPrompt(false);
       setShowCopiedPrompt(true);
@@ -3188,6 +3193,36 @@ function Review({
                   ? selected
                   : "No file selected"}
             </a>
+            {!messageView && selected && paths.includes(selected) && (
+              <button
+                className="tree-action copy-path"
+                aria-label={copiedPath === selected ? "Copied file path" : "Copy file path"}
+                title={copiedPath === selected ? "Copied" : "Copy file path"}
+                onClick={async () => {
+                  try {
+                    await copyText(selected);
+                  } catch {
+                    return;
+                  }
+                  setCopiedPath(selected);
+                  setTimeout(
+                    () => setCopiedPath((path) => (path === selected ? undefined : path)),
+                    1500,
+                  );
+                }}
+              >
+                {copiedPath === selected ? (
+                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
+                    <path d="M3 7.5l2.5 2.5L11 4.5" />
+                  </svg>
+                ) : (
+                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
+                    <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
+                    <path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6" />
+                  </svg>
+                )}
+              </button>
+            )}
             {diffView &&
               selectedEntry?.additions != null &&
               selectedEntry.deletions != null && (

@@ -722,6 +722,16 @@ button.panel-toggle:hover {
 .file-path[href]:focus-visible {
   text-decoration: underline;
 }
+.copy-path {
+  width: 22px;
+  height: 22px;
+  flex-basis: 22px;
+  margin-left: -6px;
+}
+.copy-path:hover {
+  color: #303741;
+  background: #f1f4f8;
+}
 .file-diff-stats {
   margin-left: 0;
   font-size: 10px;
