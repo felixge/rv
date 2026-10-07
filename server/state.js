@@ -36,77 +36,56 @@ export function statePath(root) {
   return path.join(stateDir(root), "state.json");
 }
 
-export function agentSessionPath(root) {
+function agentSessionPath(root) {
   return path.join(stateDir(root), "agent.json");
 }
 
-export async function loadState(root) {
+async function readCacheFile(file, root) {
   try {
-    const state = JSON.parse(await readFile(statePath(root), "utf8"));
-    if (
-      !state ||
-      typeof state !== "object" ||
-      Array.isArray(state) ||
-      // Path encoding is lossy (/a/b-c and /a/b/c encode the same), so a
-      // mismatched root means the file belongs to another repository.
-      state.root !== root
-    )
+    const data = JSON.parse(await readFile(file, "utf8"));
+    // Path encoding is lossy (/a/b-c and /a/b/c encode the same), so a
+    // mismatched root means the file belongs to another repository.
+    if (!data || typeof data !== "object" || Array.isArray(data) || data.root !== root)
       return null;
-    // version/root describe the cache file, not the review state it holds.
-    const { version, root: fileRoot, ...rest } = state;
+    // version/root describe the cache file, not the data it holds.
+    const { version, root: _, ...rest } = data;
     return rest;
   } catch {
     return null;
   }
 }
 
-export async function saveState(root, state) {
-  const file = statePath(root);
+async function writeCacheFile(file, root, data) {
   await mkdir(path.dirname(file), { recursive: true });
   // Atomic write: a crash or concurrent reader never sees a half-written file.
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify({ version: 1, root, ...state }));
+  await writeFile(tmp, JSON.stringify({ version: 1, root, ...data }));
   await rename(tmp, file);
 }
 
-export async function clearState(root) {
-  await rm(statePath(root), { force: true });
+export function loadState(root) {
+  return readCacheFile(statePath(root), root);
+}
+
+export function saveState(root, state) {
+  return writeCacheFile(statePath(root), root, state);
 }
 
 export async function loadAgentSession(root) {
-  try {
-    const session = JSON.parse(await readFile(agentSessionPath(root), "utf8"));
-    if (
-      !session ||
-      typeof session !== "object" ||
-      session.root !== root ||
-      typeof session.url !== "string" ||
-      typeof session.token !== "string"
-    )
-      return null;
-    return { url: session.url, token: session.token };
-  } catch {
-    return null;
-  }
+  const session = await readCacheFile(agentSessionPath(root), root);
+  return typeof session?.url === "string" && typeof session.token === "string"
+    ? { url: session.url, token: session.token }
+    : null;
 }
 
-export async function saveAgentSession(root, session) {
-  const file = agentSessionPath(root);
-  await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify({ version: 1, root, ...session }));
-  await rename(tmp, file);
+export function saveAgentSession(root, session) {
+  return writeCacheFile(agentSessionPath(root), root, session);
 }
 
 export async function clearAgentSession(root, token) {
-  try {
-    const session = JSON.parse(await readFile(agentSessionPath(root), "utf8"));
-    // The readable directory encoding is lossy. Never remove a colliding
-    // repository's live-session descriptor.
-    if (session?.root === root && session.token === token)
-      await rm(agentSessionPath(root), { force: true });
-  } catch {
-    // Session cleanup is best-effort; stale descriptors are rejected by the
-    // status check before the next agent session starts.
-  }
+  // The readable directory encoding is lossy. Never remove a colliding
+  // repository's live-session descriptor. Cleanup is best-effort; stale
+  // descriptors are rejected by the status check before the next session.
+  if ((await loadAgentSession(root))?.token === token)
+    await rm(agentSessionPath(root), { force: true }).catch(() => {});
 }

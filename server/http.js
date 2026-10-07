@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { clearState, loadState, saveState } from "./state.js";
+import { loadState, saveState } from "./state.js";
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const MAX_STATE = 1024 * 1024;
@@ -59,19 +59,10 @@ export function createAgentChannel(token) {
         error.status = 409;
         throw error;
       }
-      let resolve;
-      let reject;
-      const current = {
-        resolve: (value) => resolve(value),
-        reject: (error) => reject(error),
-      };
-      const promise = new Promise((done, fail) => {
-        resolve = done;
-        reject = fail;
-      });
+      const current = Promise.withResolvers();
       waiter = current;
       return {
-        promise,
+        promise: current.promise,
         cancel() {
           if (waiter === current) waiter = null;
         },
@@ -133,7 +124,7 @@ export function createApp(repo, { allowRemote = false, agent = null } = {}) {
           // served back so it survives restarts, ports and browsers.
           if (req.method === "GET")
             return send(200, (await loadState(repo.root)) || {});
-          if (req.method === "PUT" || req.method === "PATCH") {
+          if (req.method === "PATCH") {
             const body = await readBody(req, MAX_STATE);
             if (body === null)
               return send(413, { error: "State exceeds the 1 MiB limit." });
@@ -146,31 +137,26 @@ export function createApp(repo, { allowRemote = false, agent = null } = {}) {
             if (!state || typeof state !== "object" || Array.isArray(state))
               return send(400, { error: "State must be a JSON object." });
             await writeState(async () => {
-              const next = req.method === "PATCH"
-                ? { ...await loadState(repo.root), ...state }
-                : state;
+              const next = { ...await loadState(repo.root), ...state };
               if (Buffer.byteLength(JSON.stringify(next)) > MAX_STATE)
                 throw new Error("State exceeds the 1 MiB limit.");
               await saveState(repo.root, next);
             });
             return send(200, { ok: true });
           }
-          if (req.method === "DELETE") {
-            await writeState(() => clearState(repo.root));
-            return send(200, { ok: true });
-          }
           return send(405, { error: "Unsupported method." });
         }
-        if (url.pathname === "/api/agent/status") {
-          if (!agent) return send(404, { error: "Agent mode is not enabled." });
-          if (req.headers["x-rv-agent"] !== agent.token)
-            return send(403, { error: "Invalid agent session." });
-          return send(200, { ok: true });
-        }
+        if (url.pathname.startsWith("/api/agent/") && !agent)
+          return send(404, { error: "Agent mode is not enabled." });
+        // Only the rv --wait process holds the session token; the browser
+        // submits through the same-origin checks above.
+        if (
+          (url.pathname === "/api/agent/status" || url.pathname === "/api/agent/wait") &&
+          req.headers["x-rv-agent"] !== agent.token
+        )
+          return send(403, { error: "Invalid agent session." });
+        if (url.pathname === "/api/agent/status") return send(200, { ok: true });
         if (url.pathname === "/api/agent/wait") {
-          if (!agent) return send(404, { error: "Agent mode is not enabled." });
-          if (req.headers["x-rv-agent"] !== agent.token)
-            return send(403, { error: "Invalid agent session." });
           const pending = agent.wait();
           res.once("close", pending.cancel);
           const prompt = await pending.promise;
@@ -178,17 +164,14 @@ export function createApp(repo, { allowRemote = false, agent = null } = {}) {
           return sendText(200, prompt);
         }
         if (url.pathname === "/api/agent/submit") {
-          if (!agent) return send(404, { error: "Agent mode is not enabled." });
           if (req.method !== "POST")
             return send(405, { error: "Unsupported method." });
           const prompt = await readBody(req, MAX_STATE);
           if (prompt === null)
             return send(413, { error: "Prompt exceeds the 1 MiB limit." });
           if (!prompt.trim()) return send(400, { error: "Prompt is empty." });
-          await writeState(async () => {
-            const state = (await loadState(repo.root)) || {};
-            await saveState(repo.root, { ...state, comments: [] });
-          });
+          await writeState(async () =>
+            saveState(repo.root, { ...await loadState(repo.root), comments: [] }));
           agent.submit(prompt);
           return send(200, { ok: true });
         }
@@ -221,18 +204,9 @@ export function createApp(repo, { allowRemote = false, agent = null } = {}) {
           const quality = params.find((param) => param.trim().startsWith("q="));
           return encoding === "gzip" && (!quality || Number(quality.trim().slice(2)) > 0);
         });
-      let data;
-      let compressed = false;
-      if (asset && acceptsGzip) {
-        try {
-          data = await readFile(`${filename}.gz`);
-          compressed = true;
-        } catch (error) {
-          // Builds predating precompression can still be served.
-          if (error.code !== "ENOENT") throw error;
-        }
-      }
-      data ??= await readFile(filename);
+      // The build precompresses every fingerprinted asset.
+      const compressed = asset && acceptsGzip;
+      const data = await readFile(compressed ? `${filename}.gz` : filename);
       if (asset) {
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         res.setHeader("Vary", "Accept-Encoding");

@@ -8,17 +8,21 @@ const MAX_FILE = 2 * 1024 * 1024;
 const split = (value) => value.split("\0").filter(Boolean);
 const countLines = (text) =>
   text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+const unavailable = (name, notice) => ({ name, contents: "", notice });
+const TOO_LARGE = "File exceeds the 2 MiB preview limit.";
 
 export async function repository(directory) {
   const root = await realpath(directory);
-  const git = async (...args) =>
+  const run = async (args, options = {}) =>
     (
       await exec("git", ["--no-optional-locks", "-C", root, ...args], {
         encoding: "utf8",
         maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, GIT_PAGER: "cat", GIT_LITERAL_PATHSPECS: "1" },
+        ...options,
       })
     ).stdout;
+  const git = (...args) => run(args);
   let isGit = true;
   let gitRoot = root;
   try {
@@ -91,26 +95,15 @@ export async function repository(directory) {
       const entry = await git("ls-tree", "-z", ref, "--", name);
       if (!entry) return null;
       if (!entry.startsWith("100"))
-        return {
-          name,
-          contents: "",
-          notice: "Symbolic links and submodules are not displayed.",
-        };
+        return unavailable(name, "Symbolic links and submodules are not displayed.");
       const size = Number(
         (await git("cat-file", "-s", `${ref}:./${name}`)).trim(),
       );
-      if (size > MAX_FILE)
-        return {
-          name,
-          contents: "",
-          notice: "File exceeds the 2 MiB preview limit.",
-        };
-      data = (
-        await exec("git", ["-C", root, "show", `${ref}:./${name}`], {
-          encoding: "buffer",
-          maxBuffer: MAX_FILE + 1024,
-        })
-      ).stdout;
+      if (size > MAX_FILE) return unavailable(name, TOO_LARGE);
+      data = await run(["show", `${ref}:./${name}`], {
+        encoding: "buffer",
+        maxBuffer: MAX_FILE + 1024,
+      });
     } else {
       const filename = path.join(root, name);
       try {
@@ -121,25 +114,15 @@ export async function repository(directory) {
         checkPath(relative.split(path.sep).join("/"));
         const stat = await lstat(filename);
         if (!stat.isFile())
-          return {
-            name,
-            contents: "",
-            notice: "Symbolic links and directories are not displayed.",
-          };
-        if (stat.size > MAX_FILE)
-          return {
-            name,
-            contents: "",
-            notice: "File exceeds the 2 MiB preview limit.",
-          };
+          return unavailable(name, "Symbolic links and directories are not displayed.");
+        if (stat.size > MAX_FILE) return unavailable(name, TOO_LARGE);
         data = await readFile(filename);
       } catch (error) {
         if (error.code === "ENOENT") return null;
         throw error;
       }
     }
-    if (data.includes(0))
-      return { name, contents: "", notice: "Binary file — no text preview." };
+    if (data.includes(0)) return unavailable(name, "Binary file — no text preview.");
     return { name, contents: data.toString("utf8") };
   }
 

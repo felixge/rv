@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { clearState, loadState, saveState, statePath } from "../server/state.js";
+import { loadState, saveState, statePath } from "../server/state.js";
 import { createApp } from "../server/http.js";
 import { repository } from "../server/repository.js";
 import { fixture } from "./fixture.js";
@@ -48,9 +48,6 @@ test("state is a per-repository cache file in RV_CACHE_DIR", async (t) => {
   const other = await fixture();
   t.after(other.cleanup);
   assert.equal(await loadState(other.root), null);
-
-  await clearState(f.root);
-  assert.equal(await loadState(f.root), null);
 });
 
 test("malformed cache files are ignored, not fatal", async (t) => {
@@ -86,7 +83,7 @@ test("the state API round-trips browser state to disk", async (t) => {
     comments: [{ id: "c1", path: "src/shipping.ts", start: 3, end: 3, text: "Hi" }],
   };
   assert.equal(
-    (await fetch(`${url}/api/state`, { method: "PUT", headers, body: JSON.stringify(state) }))
+    (await fetch(`${url}/api/state`, { method: "PATCH", headers, body: JSON.stringify(state) }))
       .status,
     200,
   );
@@ -106,10 +103,6 @@ test("the state API round-trips browser state to disk", async (t) => {
   ));
   assert.deepEqual(responses.map((response) => response.status), [200, 200]);
   assert.deepEqual(await loadState(f.root), { ...state, comments, view });
-
-  assert.equal((await fetch(`${url}/api/state`, { method: "DELETE", headers })).status, 200);
-  assert.deepEqual(await (await fetch(`${url}/api/state`, { headers })).json(), {});
-  assert.equal(await loadState(f.root), null);
 });
 
 test("the state API rejects junk, oversize bodies and other methods", async (t) => {
@@ -124,30 +117,31 @@ test("the state API rejects junk, oversize bodies and other methods", async (t) 
   const headers = { "X-Rv": "1" };
 
   assert.equal(
-    (await fetch(`${url}/api/state`, { method: "PUT", headers, body: "{nope" })).status,
+    (await fetch(`${url}/api/state`, { method: "PATCH", headers, body: "{nope" })).status,
     400,
   );
   assert.equal(
-    (await fetch(`${url}/api/state`, { method: "PUT", headers, body: "[1,2]" })).status,
+    (await fetch(`${url}/api/state`, { method: "PATCH", headers, body: "[1,2]" })).status,
     400,
   );
   assert.equal(
     (
       await fetch(`${url}/api/state`, {
-        method: "PUT",
+        method: "PATCH",
         headers,
         body: JSON.stringify({ pad: "x".repeat(1024 * 1024 + 1) }),
       })
     ).status,
     413,
   );
-  assert.equal(
-    (await fetch(`${url}/api/state`, { method: "POST", headers, body: "{}" })).status,
-    405,
-  );
+  for (const method of ["POST", "PUT", "DELETE"])
+    assert.equal(
+      (await fetch(`${url}/api/state`, { method, headers, body: "{}" })).status,
+      405,
+    );
   // Same-origin rules apply to state writes like every other API call.
   assert.equal(
-    (await fetch(`${url}/api/state`, { method: "PUT", body: "{}" })).status,
+    (await fetch(`${url}/api/state`, { method: "PATCH", body: "{}" })).status,
     403,
   );
   assert.equal(await loadState(f.root), null);

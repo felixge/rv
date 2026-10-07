@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { randomBytes } from "node:crypto";
 import { repository } from "../server/repository.js";
 import { createAgentChannel, createApp } from "../server/http.js";
@@ -16,6 +17,25 @@ const agentSkill = `Use rv to collect review feedback from the user:
 3. Apply the submitted feedback, then run "rv --wait" again for the next review round.
 
 The browser UI stays open between rounds. A successful submission clears its comments, and submissions made between wait calls remain queued.`;
+
+const usage = `Usage: rv [directory] [--working | --commit <ref> | --range <from>..<to>]
+       [--agent] [--port 4444] [--no-open]
+       rv [directory] --wait
+       rv --skill
+
+Review the current repository in your browser. Refresh the page to see new changes.
+If the default port 4444 is busy, a free port is picked automatically.
+--host 0.0.0.0 allows remote access; use only behind a trusted proxy.
+
+Open on a specific review view:
+  --working             Uncommitted changes
+  --commit <ref>        A single commit, e.g. --commit HEAD
+  --range <from>..<to>  A commit range, e.g. --range main..HEAD
+
+Agent integration:
+  --agent               Enable submitting review prompts to an agent
+  --wait                Wait for the next submitted prompt and print it
+  --skill               Print instructions for coding agents`;
 
 async function sessionIsActive(session) {
   try {
@@ -49,20 +69,10 @@ async function waitForSubmission(root) {
   );
 }
 
+// Resolves once listening; rejects with the server's error (e.g. EADDRINUSE).
 function listen(server, options) {
-  return new Promise((resolve, reject) => {
-    const failed = (error) => {
-      server.off("listening", listening);
-      reject(error);
-    };
-    const listening = () => {
-      server.off("error", failed);
-      resolve();
-    };
-    server.once("error", failed);
-    server.once("listening", listening);
-    server.listen(options);
-  });
+  server.listen(options);
+  return once(server, "listening");
 }
 
 try {
@@ -82,9 +92,7 @@ try {
     },
   });
   if (values.help) {
-    console.log(
-      "Usage: rv [directory] [--working | --commit <ref> | --range <from>..<to>]\n       [--agent] [--port 4444] [--no-open]\n       rv [directory] --wait\n       rv --skill\n\nReview the current repository in your browser. Refresh the page to see new changes.\nIf the default port 4444 is busy, a free port is picked automatically.\n--host 0.0.0.0 allows remote access; use only behind a trusted proxy.\n\nOpen on a specific review view:\n  --working             Uncommitted changes\n  --commit <ref>        A single commit, e.g. --commit HEAD\n  --range <from>..<to>  A commit range, e.g. --range main..HEAD\n\nAgent integration:\n  --agent               Enable submitting review prompts to an agent\n  --wait                Wait for the next submitted prompt and print it\n  --skill               Print instructions for coding agents",
-    );
+    console.log(usage);
   } else if (values.skill) {
     console.log(agentSkill);
   } else {
