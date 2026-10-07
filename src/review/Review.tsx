@@ -13,26 +13,24 @@ import {
   type FileDiffMetadata,
   type SelectedLineRange,
 } from "@pierre/diffs";
-import { BrowserTree, directoryPaths } from "../components/BrowserTree";
 import { FileFinder } from "../components/FileFinder";
-import { LineStats } from "../components/LineStats";
-import { Modal } from "../components/Modal";
-import { PanelResizeHandle } from "../components/PanelResizeHandle";
 import { ReviewPalette } from "../components/ReviewPalette";
 import { CommandLauncher } from "../components/CommandLauncher";
 import { api, loadFile } from "../lib/api";
 import { copyText } from "../lib/clipboard";
 import { nameHue } from "../lib/format";
-import { onCmdEnter, onPlainClick } from "../lib/events";
+import { isTyping } from "../lib/events";
 import { readLocation, readPreferences, viewHref, type ViewLocation } from "../lib/location";
-import { rememberScroll, restoreScroll, scrollStore } from "../lib/scroll";
-import { shortcuts, type Command } from "../lib/shortcuts";
-import {
-  textSearchHighlightName,
-  textSearchMatches,
-  textSearchMatchesHighlightName,
-} from "../lib/textSearch";
+import type { Command } from "../lib/shortcuts";
 import { formatPrompt, reference } from "../prompt.js";
+import { TextSearchBar, useTextSearch } from "./TextSearch";
+import { Sidebar } from "./Sidebar";
+import { CommentsPanel } from "./CommentsPanel";
+import { FileHeading } from "./FileHeading";
+import { CopiedPromptDialog, LinePicker, PromptDialog } from "./Dialogs";
+import { useKeyboard } from "./useKeyboard";
+import { useViewerScroll } from "./useViewerScroll";
+import { useSavedState } from "./useSavedState";
 import {
   MESSAGE_PATH,
   type Comment,
@@ -40,7 +38,6 @@ import {
   type Content,
   type Info,
   type SavedState,
-  type TextSearchMatch,
   type ViewerMode,
 } from "../types";
 
@@ -64,7 +61,6 @@ export function Review({
   const [comments, setComments] = useState<Comment[]>(() =>
     Array.isArray(state.comments) ? state.comments : [],
   );
-  const [storageError, setStorageError] = useState("");
   const [tab, setTab] = useState(saved.tab);
   const [mode, setMode] = useState(saved.mode);
   const [from, setFrom] = useState(saved.from);
@@ -96,23 +92,13 @@ export function Review({
   const [editing, setEditing] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
-  const [copiedPath, setCopiedPath] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [showCopiedPrompt, setShowCopiedPrompt] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  const [showTextSearch, setShowTextSearch] = useState(false);
-  const [highlightSelectedText, setHighlightSelectedText] = useState(false);
-  const [textSearch, setTextSearch] = useState("");
-  const [activeTextMatch, setActiveTextMatch] = useState(0);
+  const [dialog, setDialog] =
+    useState<"commands" | "finder" | "line" | "prompt" | "copied" | null>(null);
+  const closeDialog = () => setDialog(null);
   const [reviewPickerRequest, setReviewPickerRequest] = useState(0);
-  const [showFinder, setShowFinder] = useState(false);
-  const [showLinePicker, setShowLinePicker] = useState(false);
-  const [lineTarget, setLineTarget] = useState("");
-  const [lineSide, setLineSide] = useState<"additions" | "deletions">("additions");
-  const [lineError, setLineError] = useState("");
   const [showFiles, setShowFiles] = useState(saved.showFiles);
   const [showComments, setShowComments] = useState(saved.showComments);
   const [filesWidth, setFilesWidth] = useState(saved.filesWidth);
@@ -120,6 +106,11 @@ export function Review({
   const [collapsed, setCollapsed] = useState(saved.collapsed);
   const [highlight, setHighlight] = useState<Comment | null>(null);
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
+  const cancelComment = () => {
+    setEditing(undefined);
+    setRange(null);
+    setDraft("");
+  };
   const clearSelection = () => {
     setRange(null);
     setHighlight(null);
@@ -127,38 +118,23 @@ export function Review({
   };
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const viewerContainer = useRef<HTMLDivElement>(null);
-  const textSearchInput = useRef<HTMLInputElement>(null);
-  const selectedTextMatch = useRef<number | null>(null);
   const interactionVersion = useRef(0);
   const viewerFocusRequest = useRef<number | null>(null);
   const viewerScrollKey = JSON.stringify(["viewer", contentKey, viewerMode]);
-  const activeViewerScrollKey = useRef(viewerScrollKey);
-  activeViewerScrollKey.current = viewerScrollKey;
-  const explicitViewerScrollKey = useRef("");
   const comparisonRequest = useRef(0);
   const viewRefresh = useRef(0);
   const latestCommitPending = useRef(false);
   const [contentRevision, setContentRevision] = useState(0);
-  const keySequence = useRef("");
-  const keySequenceTimer = useRef<number | undefined>(undefined);
   const reviewHistory = useRef<{
     scope: string;
     paths: string[];
     reviewed: boolean;
   }[]>([]);
   const treeOrder = useRef<[string[], string[]]>([[], []]);
-  const setUnreviewedTreeOrder = useCallback((paths: string[]) => {
-    treeOrder.current[0] = paths;
-  }, []);
-  const setReviewedTreeOrder = useCallback((paths: string[]) => {
-    treeOrder.current[1] = paths;
-  }, []);
   useEffect(() => {
     const trackInteraction = () => interactionVersion.current++;
     const trackTypingFocus = (event: FocusEvent) => {
-      if ((event.target as HTMLElement).matches(
-        "input, textarea, select, [contenteditable=true]",
-      )) trackInteraction();
+      if (isTyping(event.target)) trackInteraction();
     };
     document.addEventListener("pointerdown", trackInteraction, true);
     document.addEventListener("keydown", trackInteraction, true);
@@ -198,65 +174,14 @@ export function Review({
     return () => window.removeEventListener("popstate", restoreURL);
   }, []);
 
-  // Send only changed sections: navigation or preferences in another tab must
-  // never write its stale copy of comments back over the shared review.
-  const stateRef = useRef<SavedState>(state);
-  const pendingState = useRef<SavedState>({});
-  const stateDirty = useRef(false);
-  const stateFlush = useRef<(keepalive?: boolean) => void>(() => {});
-  useEffect(() => {
+  const { error: storageError, saveNow } = useSavedState(state, {
+    view: { search, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
     // Mutable views are only reviewed for this page snapshot.
-    const next: SavedState = {
-      view: { search, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
-      reviewed: Object.fromEntries(
-        Object.entries(reviewed).filter(
-          ([scope]) => scope !== "files" && scope !== "working",
-        ),
-      ),
-      comments,
-    };
-    for (const key of ["view", "reviewed", "comments"] as const) {
-      if (JSON.stringify(next[key]) !== JSON.stringify(stateRef.current[key])) {
-        Object.assign(pendingState.current, { [key]: next[key] });
-        stateDirty.current = true;
-      }
-    }
-    stateRef.current = next;
-    const timer = setTimeout(() => stateFlush.current(), 250);
-    return () => clearTimeout(timer);
-  }, [
-    search, wrap, showFiles, showComments, filesWidth, commentsWidth,
-    collapsed, reviewed, comments,
-  ]);
-  useEffect(() => {
-    const flush = (keepalive = false) => {
-      if (!stateDirty.current) return;
-      stateDirty.current = false;
-      const patch = pendingState.current;
-      pendingState.current = {};
-      fetch("/api/state", {
-        method: "PATCH",
-        headers: { "X-Rv": "1" },
-        body: JSON.stringify(patch),
-        keepalive,
-      })
-        .then(async (response) => {
-          if (response.ok) return;
-          throw new Error((await response.json()).error);
-        })
-        .catch(() => {
-          pendingState.current = { ...patch, ...pendingState.current };
-          stateDirty.current = true;
-          setStorageError(
-            "Could not save review state to disk. Copy your comments before closing.",
-          );
-        });
-    };
-    stateFlush.current = flush;
-    const flushOnHide = () => flush(true);
-    window.addEventListener("pagehide", flushOnHide);
-    return () => window.removeEventListener("pagehide", flushOnHide);
-  }, []);
+    reviewed: Object.fromEntries(
+      Object.entries(reviewed).filter(([scope]) => scope !== "files" && scope !== "working"),
+    ),
+    comments,
+  });
   const paths = useMemo(
     () =>
       tab === "files"
@@ -265,7 +190,6 @@ export function Review({
     [tab, info.files, comparison],
   );
   const entries = tab === "files" ? info.working.entries : comparison.entries;
-  const fileSearch = search.trim().replaceAll("\\", "/").toLowerCase();
   const selectedEntry = comparison.entries.find((entry) => entry.path === selected);
   const messageView =
     tab === "changes" &&
@@ -295,17 +219,7 @@ export function Review({
             comparison.target,
           ]);
   const reviewedInView = reviewed[reviewScope];
-  const [unreviewedPaths, reviewedPaths] = useMemo(
-    () => [
-      paths.filter((path) => !reviewedInView?.includes(path)),
-      paths.filter((path) => reviewedInView?.includes(path)),
-    ],
-    [paths, reviewedInView],
-  );
   const hasMessage = tab === "changes" && comparison.message !== undefined;
-  const messageReviewed = reviewedInView?.includes(MESSAGE_PATH) || false;
-  const reviewedCount =
-    reviewedPaths.length + (hasMessage && messageReviewed ? 1 : 0);
   const selectedReviewed = reviewedInView?.includes(selected) || false;
   const focusViewer = useCallback(() => {
     viewerContainer.current?.focus({ preventScroll: true });
@@ -424,7 +338,7 @@ export function Review({
   function changeViewerMode(value: ViewerMode) {
     setViewerMode(value);
     clearSelection();
-    setShowLinePicker(false);
+    closeDialog();
   }
 
   const onSelection = useCallback((value: SelectedLineRange | null) => {
@@ -502,227 +416,9 @@ export function Review({
     }
     return diff;
   }, [content, contentKey, diffView, notice]);
-  const textMatches = useMemo(
-    () => textSearchMatches(
-      textSearch,
-      fileSource || null,
-      fileDiff,
-      split,
-      expanded,
-    ),
-    [textSearch, fileSource, fileDiff, split, expanded],
-  );
-  const currentTextMatch = textMatches[activeTextMatch];
-  useEffect(() => {
-    const onTextSelection = (event: Event) => {
-      const host = viewerContainer.current?.querySelector("diffs-container");
-      const shadow = host?.shadowRoot;
-      if (!host || !event.composedPath().includes(host)) return;
-      const selection = (
-        shadow as ShadowRoot & { getSelection?: () => Selection | null }
-      )?.getSelection?.() || document.getSelection();
-      const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
-      const startElement = range?.startContainer instanceof Element
-        ? range.startContainer
-        : range?.startContainer.parentElement;
-      const endElement = range?.endContainer instanceof Element
-        ? range.endContainer
-        : range?.endContainer.parentElement;
-      const startLine = startElement?.closest<HTMLElement>("[data-line]");
-      const endLine = endElement?.closest<HTMLElement>("[data-line]");
-      const query = selection?.toString() || "";
-      if (
-        !range || range.collapsed || !shadow || !startLine ||
-        startLine !== endLine || !shadow.contains(startLine) || query.includes("\n")
-      ) {
-        setHighlightSelectedText(false);
-        return;
-      }
-
-      const beforeSelection = document.createRange();
-      beforeSelection.selectNodeContents(startLine);
-      beforeSelection.setEnd(range.startContainer, range.startOffset);
-      const start = beforeSelection.toString().length;
-      const side = startLine.closest("[data-deletions]") ||
-          startLine.dataset.lineType?.includes("deletion")
-        ? "deletions"
-        : startLine.closest("[data-additions]") ||
-            startLine.dataset.lineType?.includes("addition")
-          ? "additions"
-          : undefined;
-      const matches = textSearchMatches(query, fileSource || null, fileDiff, split, expanded);
-      const selectedMatch = matches.findIndex((match) =>
-        match.line === Number(startLine.dataset.line) &&
-        match.start === start && match.side === side
-      );
-      if (selectedMatch === -1) {
-        setHighlightSelectedText(false);
-        return;
-      }
-      setTextSearch(query);
-      selectedTextMatch.current = selectedMatch;
-      setActiveTextMatch(selectedMatch);
-      setHighlightSelectedText(true);
-      setShowTextSearch(false);
-    };
-    document.addEventListener("pointerup", onTextSelection);
-    document.addEventListener("dblclick", onTextSelection);
-    return () => {
-      document.removeEventListener("pointerup", onTextSelection);
-      document.removeEventListener("dblclick", onTextSelection);
-    };
-  }, [fileSource, fileDiff, split, expanded]);
-  useEffect(
-    () => setHighlightSelectedText(false),
-    [contentKey, viewerMode],
-  );
-  useEffect(
-    () => {
-      setActiveTextMatch(selectedTextMatch.current ?? 0);
-      selectedTextMatch.current = null;
-    },
-    [textSearch, contentKey, viewerMode, split, expanded],
-  );
-  useEffect(() => {
-    if (!showTextSearch || !currentTextMatch || !viewer.current) return;
-    viewer.current.scrollTo({
-      type: "line",
-      id: selected,
-      lineNumber: currentTextMatch.line,
-      side: currentTextMatch.side,
-      align: "center",
-    });
-  }, [showTextSearch, currentTextMatch, selected]);
-  useEffect(() => {
-    CSS.highlights.delete(textSearchHighlightName);
-    CSS.highlights.delete(textSearchMatchesHighlightName);
-    if (
-      (!showTextSearch && !highlightSelectedText) ||
-      !currentTextMatch || !viewerContainer.current
-    ) return;
-    const host = viewerContainer.current.querySelector("diffs-container");
-    const shadow = host?.shadowRoot;
-    if (!shadow) return;
-    const style = document.createElement("style");
-    style.textContent = `::highlight(${textSearchMatchesHighlightName}) {
-      color: inherit;
-      background: rgba(147, 157, 171, 0.35);
-    }
-    ::highlight(${textSearchHighlightName}) {
-      color: inherit;
-      background: #ffd75e;
-    }`;
-    shadow.append(style);
-
-    const rangeForMatch = (
-      match: TextSearchMatch,
-      renderedLines: Map<number, HTMLElement[]>,
-    ) => {
-      const side = match.side;
-      const lines = renderedLines.get(match.line) || [];
-      const line = !side
-        ? lines[0]
-        : lines.find((candidate) =>
-            candidate.closest(`[data-${side}]`) ||
-            candidate.dataset.lineType?.includes(
-              side === "deletions" ? "deletion" : "addition",
-            )
-          );
-      if (!line) return null;
-      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
-      let offset = 0;
-      let startNode: Text | null = null;
-      let endNode: Text | null = null;
-      let startOffset = 0;
-      let endOffset = 0;
-      while (walker.nextNode()) {
-        const node = walker.currentNode as Text;
-        const nextOffset = offset + node.data.length;
-        if (!startNode && match.start < nextOffset) {
-          startNode = node;
-          startOffset = match.start - offset;
-        }
-        if (match.end <= nextOffset) {
-          endNode = node;
-          endOffset = match.end - offset;
-          break;
-        }
-        offset = nextOffset;
-      }
-      if (!startNode || !endNode) return null;
-      const range = new Range();
-      range.setStart(startNode, startOffset);
-      range.setEnd(endNode, endOffset);
-      return range;
-    };
-
-    const applyHighlights = () => {
-      CSS.highlights.delete(textSearchHighlightName);
-      CSS.highlights.delete(textSearchMatchesHighlightName);
-      const renderedLines = new Map<number, HTMLElement[]>();
-      for (const line of shadow.querySelectorAll<HTMLElement>("[data-line]")) {
-        const number = Number(line.dataset.line);
-        const candidates = renderedLines.get(number) || [];
-        candidates.push(line);
-        renderedLines.set(number, candidates);
-      }
-      const otherRanges = textMatches
-        .filter((match) => match !== currentTextMatch)
-        .map((match) => rangeForMatch(match, renderedLines))
-        .filter((range): range is Range => range !== null);
-      if (otherRanges.length) {
-        CSS.highlights.set(
-          textSearchMatchesHighlightName,
-          new Highlight(...otherRanges),
-        );
-      }
-      const activeRange = rangeForMatch(currentTextMatch, renderedLines);
-      if (!activeRange) return false;
-      CSS.highlights.set(textSearchHighlightName, new Highlight(activeRange));
-      return true;
-    };
-
-    applyHighlights();
-    // CodeView first mounts plain text and later replaces it with highlighted
-    // token nodes. It also replaces lines as they enter and leave the virtual
-    // window, so rebuild the Range after either kind of DOM change.
-    const observer = new MutationObserver(applyHighlights);
-    observer.observe(shadow, {
-      attributes: true,
-      characterData: true,
-      childList: true,
-      subtree: true,
-    });
-    return () => {
-      observer.disconnect();
-      CSS.highlights.delete(textSearchHighlightName);
-      CSS.highlights.delete(textSearchMatchesHighlightName);
-      style.remove();
-    };
-  }, [showTextSearch, highlightSelectedText, textMatches, currentTextMatch, contentKey, viewerMode]);
-  const moveTextMatch = (offset: number) => {
-    if (!textMatches.length) return;
-    setActiveTextMatch((current) =>
-      (current + offset + textMatches.length) % textMatches.length,
-    );
-  };
-  const openTextSearch = () => {
-    setHighlightSelectedText(false);
-    setShowTextSearch(true);
-    requestAnimationFrame(() => {
-      textSearchInput.current?.focus();
-      textSearchInput.current?.select();
-    });
-  };
-  const findTextMatch = (offset: number) => {
-    if (!textSearch) {
-      openTextSearch();
-      return;
-    }
-    setHighlightSelectedText(false);
-    setShowTextSearch(true);
-    moveTextMatch(offset);
-  };
+  const find = useTextSearch({
+    fileSource, fileDiff, split, expanded, contentKey, viewerMode, selected, viewer, viewerContainer,
+  });
   const annotations = comments.filter(matchesView).map((comment) => ({
     lineNumber: comment.end,
     side:
@@ -743,55 +439,17 @@ export function Review({
     previousContent.current = content;
     itemVersion.current++;
   }
-  const items: CodeViewItem<Comment>[] =
-    content && !notice
-      ? fileSource
-        ? [
-            {
-              type: "file",
-              id: selected,
-              file: fileSource,
-              annotations,
-              version: itemVersion.current,
-            },
-          ]
-        : fileDiff
-          ? [
-              {
-                type: "diff",
-                id: selected,
-                fileDiff,
-                annotations,
-                version: itemVersion.current,
-              },
-            ]
-          : []
-      : [];
+  const item = fileSource ? { type: "file" as const, file: fileSource }
+    : fileDiff ? { type: "diff" as const, fileDiff } : null;
+  const items = (content && !notice && item
+    ? [{ ...item, id: selected, annotations, version: itemVersion.current }]
+    : []) as CodeViewItem<Comment>[];
   const highlightedRange =
     highlight && matchesView(highlight) ? commentRange(highlight) : range;
   // Full-file rendering has one column; side metadata is only for the comment.
   const viewerRange = highlightedRange && !diffView
     ? { start: highlightedRange.start, end: highlightedRange.end }
     : highlightedRange;
-  // The explorer lists current files, not changes: show their total size in
-  // lines instead of +/− change stats. Stats follow the file search.
-  function groupStats(groupPaths: string[]) {
-    const visible = groupPaths.filter((path) => path.toLowerCase().includes(fileSearch));
-    if (tab === "files") {
-      const missing = visible.some((path) => info.lineCounts[path] == null);
-      return {
-        lines: visible.reduce((sum, path) => sum + (info.lineCounts[path] || 0), 0),
-        title: `Total lines of code${missing ? "; excludes binary or unpreviewable files" : ""}`,
-      };
-    }
-    const changes = entries.filter((entry) => visible.includes(entry.path));
-    const missing = changes.some((entry) => entry.additions == null || entry.deletions == null);
-    return {
-      additions: changes.reduce((sum, entry) => sum + (entry.additions || 0), 0),
-      deletions: changes.reduce((sum, entry) => sum + (entry.deletions || 0), 0),
-      title: `Lines changed${missing ? "; excludes files with unavailable line counts (binary or unpreviewable text)" : ""}`,
-    };
-  }
 
   useEffect(() => {
     if (
@@ -804,59 +462,18 @@ export function Review({
     }
   }, [content, loading, comparing, restoring, items.length, focusViewer]);
 
-  useEffect(() => {
-    const scrollKey = viewerScrollKey;
-    let scroller: HTMLElement | null = null;
-    const save = () => {
-      if (scroller && activeViewerScrollKey.current === scrollKey)
-        rememberScroll(info.root, scrollKey, scroller);
-    };
-    // Explicit comment navigation owns the destination; ordinary file and mode
-    // navigation returns to the last position for that exact rendered view.
-    const position = scrollStore(info.root)[scrollKey];
-    const restoreInteraction = interactionVersion.current;
-    let frame = 0;
-    let listening = false;
-    let attempts = 0;
-    const restore = () => {
-      scroller ||= viewerContainer.current;
-      if (!scroller) {
-        if (attempts++ < 120) frame = requestAnimationFrame(restore);
-        return;
-      }
-      // Syntax highlighting can finish after mount. Wait until the virtualized
-      // content is tall enough instead of letting the browser clamp the saved
-      // position to zero before those lines exist.
-      if (
-        position &&
-        scroller.scrollHeight - scroller.clientHeight < position.top &&
-        attempts++ < 120
-      ) {
-        frame = requestAnimationFrame(restore);
-        return;
-      }
-      if (interactionVersion.current !== restoreInteraction) {
-        // Never override scrolling or focus movement performed while the
-        // virtualized content was still finishing its initial render.
-      } else if (explicitViewerScrollKey.current === scrollKey)
-        explicitViewerScrollKey.current = "";
-      else restoreScroll(info.root, scrollKey, scroller);
-      scroller.addEventListener("scroll", save, { passive: true });
-      listening = true;
-    };
-    frame = requestAnimationFrame(restore);
-    return () => {
-      cancelAnimationFrame(frame);
-      if (listening && scroller) {
-        scroller.removeEventListener("scroll", save);
-      }
-    };
-  }, [info.root, viewerScrollKey, content]);
+  const skipScrollRestore = useViewerScroll({
+    root: info.root,
+    scrollKey: viewerScrollKey,
+    content,
+    container: viewerContainer,
+    interactionVersion,
+  });
 
   useEffect(() => {
     if (!pendingComment || loading || comparing || !content || !viewer.current)
       return;
-    explicitViewerScrollKey.current = viewerScrollKey;
+    skipScrollRestore();
     viewer.current.scrollTo({
       type: "range",
       id: pendingComment.path,
@@ -957,9 +574,7 @@ export function Review({
       };
       setComments((items) => [...items, comment]);
     }
-    setDraft("");
-    setEditing(undefined);
-    setRange(null);
+    cancelComment();
     setCopied(false);
   }
 
@@ -985,8 +600,7 @@ export function Review({
     try {
       await copyText(prompt);
       setCopied(true);
-      setShowPrompt(false);
-      setShowCopiedPrompt(true);
+      setDialog("copied");
     } catch {
       setCopied(false);
       setCopyError(
@@ -1007,17 +621,13 @@ export function Review({
       });
       if (!response.ok) throw new Error((await response.json()).error);
       setComments([]);
-      setDraft("");
+      cancelComment();
       setGeneralDraft("");
-      setEditing(undefined);
-      setRange(null);
       setHighlight(null);
-      setShowPrompt(false);
+      closeDialog();
       setCopied(false);
       setSubmitted(true);
-      pendingState.current = { ...pendingState.current, comments: [] };
-      stateDirty.current = true;
-      stateFlush.current();
+      saveNow({ comments: [] });
     } catch (error) {
       setSubmitError((error as Error).message || "Could not submit the prompt.");
     } finally {
@@ -1058,8 +668,7 @@ export function Review({
     setComments([]);
     setReviewed({});
     reviewHistory.current = [];
-    setEditing(undefined);
-    setDraft("");
+    cancelComment();
     setGeneralDraft("");
     clearSelection();
     setCopied(false);
@@ -1073,7 +682,7 @@ export function Review({
   }
 
   function clearCopiedReview() {
-    setShowCopiedPrompt(false);
+    closeDialog();
     resetReview();
   }
 
@@ -1149,44 +758,28 @@ export function Review({
     select(reviewItems[next]);
   }
 
-  function selectLineTarget() {
-    const match = lineTarget.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-    if (!match) {
-      setLineError("Enter a line number or range, such as 12 or 12-15.");
-      return;
-    }
-    const first = Number(match[1]);
-    const last = Number(match[2] || match[1]);
-    const side = singleSide || lineSide;
-    const source = side === "deletions" ? content?.oldFile : content?.newFile;
-    const lineCount = source?.contents ? source.contents.split("\n").length : 0;
-    if (first < 1 || last < 1 || first > lineCount || last > lineCount) {
-      setLineError(`Choose a line between 1 and ${lineCount}.`);
-      return;
-    }
+  function pickLines(start: number, end: number, side: "additions" | "deletions") {
     const nextRange: SelectedLineRange = {
-      start: Math.min(first, last),
-      end: Math.max(first, last),
+      start,
+      end,
       ...(tab === "changes" && !messageView ? { side } : {}),
     };
-    setShowLinePicker(false);
-    setShowComments(true);
-    setLineError("");
+    closeDialog();
     onSelection(nextRange);
     requestAnimationFrame(() => viewer.current?.scrollTo({
       type: "range",
       id: selected,
-      range: diffView ? nextRange : { start: nextRange.start, end: nextRange.end },
+      range: diffView ? nextRange : { start, end },
       align: "center",
     }));
   }
 
   function runCommand(command: Command) {
-    if (command === "palette") setShowShortcuts(true);
-    else if (command === "find-viewed-file") openTextSearch();
-    else if (command === "next-text-match") findTextMatch(1);
-    else if (command === "previous-text-match") findTextMatch(-1);
-    else if (command === "find-file") setShowFinder(true);
+    if (command === "palette") setDialog("commands");
+    else if (command === "find-viewed-file") find.show();
+    else if (command === "next-text-match") find.findNext(1);
+    else if (command === "previous-text-match") find.findNext(-1);
+    else if (command === "find-file") setDialog("finder");
     else if (command === "search-files") {
       setShowFiles(true);
       requestAnimationFrame(() =>
@@ -1220,15 +813,12 @@ export function Review({
           latestCommitPending.current = false;
         });
     } else if (command === "comment" && content && !notice && (diffView || fileSource)) {
-      setLineTarget(range ? `${start}${end !== start ? `-${end}` : ""}` : "");
-      setLineSide(singleSide || (range?.side === "deletions" ? "deletions" : "additions"));
-      setLineError("");
-      setShowLinePicker(true);
+      setDialog("line");
     } else if (command === "toggle-reviewed") toggleReviewed();
     else if (command === "undo") undo();
     else if (command === "save-comment") saveComment();
     else if (command === "copy-prompt" && comments.length) void copyPrompt();
-    else if (command === "preview-prompt" && comments.length) setShowPrompt(true);
+    else if (command === "preview-prompt" && comments.length) setDialog("prompt");
     else if (command === "toggle-diff" && diffView) setSplit((value) => !value);
     else if (command === "toggle-wrap") setWrap((value) => !value);
     else if (command === "toggle-files") setShowFiles((value) => !value);
@@ -1236,80 +826,21 @@ export function Review({
     else if (command === "expand-diff" && fileDiff) setExpanded(true);
     else if (command === "collapse-diff" && fileDiff) setExpanded(false);
     else if (command === "refresh") location.reload();
-    else if (command === "cancel") {
-      setEditing(undefined);
-      setRange(null);
-      setDraft("");
-    }
+    else if (command === "cancel") cancelComment();
   }
 
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      const target = event.target as HTMLElement;
-      const typing = target.matches("input, textarea, select, [contenteditable=true]");
-      const key = event.key.toLowerCase();
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === "f" || key === "g")) {
-        event.preventDefault();
-        if (key === "f") openTextSearch();
-        else findTextMatch(event.shiftKey ? -1 : 1);
-        return;
-      }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && key === "k") {
-        event.preventDefault();
-        setShowShortcuts(true);
-        return;
-      }
-
-      if (event.key === "Escape") {
-        if (showTextSearch) {
-          event.preventDefault();
-          setShowTextSearch(false);
-          focusViewer();
-        } else if (showShortcuts || showFinder || showLinePicker || showPrompt || showCopiedPrompt) {
-          event.preventDefault();
-          setShowShortcuts(false);
-          setShowFinder(false);
-          setShowLinePicker(false);
-          setShowPrompt(false);
-          setShowCopiedPrompt(false);
-        } else if (editing || range) {
-          event.preventDefault();
-          setEditing(undefined);
-          setRange(null);
-          setDraft("");
-        }
-        return;
-      }
-      if (
-        typing || event.metaKey || event.ctrlKey || event.altKey ||
-        showShortcuts || showFinder || showLinePicker || showPrompt || showCopiedPrompt
-      )
-        return;
-
-      const sequence = keySequence.current;
-      keySequence.current = "";
-      window.clearTimeout(keySequenceTimer.current);
-      if (!sequence && key === "g") {
-        event.preventDefault();
-        keySequence.current = "g";
-        keySequenceTimer.current = window.setTimeout(() => {
-          keySequence.current = "";
-        }, 1000);
-        return;
-      }
-      const bind = sequence + key;
-      const shortcut =
-        (event.shiftKey && shortcuts.find((item) => item.bind === bind.toUpperCase())) ||
-        shortcuts.find((item) => item.bind === bind);
-      if (!shortcut) return;
-      event.preventDefault();
-      runCommand(shortcut.command);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      window.clearTimeout(keySequenceTimer.current);
-    };
+  useKeyboard({
+    run: runCommand,
+    escape: () => {
+      if (find.open) {
+        find.close();
+        focusViewer();
+      } else if (dialog) closeDialog();
+      else if (editing || range) cancelComment();
+      else return false;
+      return true;
+    },
+    dialogOpen: !!dialog,
   });
 
   return (
@@ -1364,7 +895,7 @@ export function Review({
           <button
             className="finder-trigger"
             title="Find a file (F)"
-            onClick={() => setShowFinder(true)}
+            onClick={() => setDialog("finder")}
           >
             <span aria-hidden="true">⌕</span>
             Find file
@@ -1374,7 +905,7 @@ export function Review({
             className="shortcut-trigger"
             aria-label="Command launcher"
             title="Command launcher (? or Cmd+K)"
-            onClick={() => setShowShortcuts(true)}
+            onClick={() => setDialog("commands")}
           >
             ?
           </button>
@@ -1411,298 +942,59 @@ export function Review({
             ›
           </button>
         </div>
-        <aside
-          className="sidebar"
-          id="file-browser"
-          aria-label="File browser"
+        <Sidebar
+          tab={tab}
+          paths={paths}
+          entries={entries}
+          lineCounts={info.lineCounts}
+          hasMessage={hasMessage}
+          reviewed={reviewedInView}
+          reviewScope={reviewScope}
+          selected={selected}
+          onSelect={select}
+          fileHref={fileHref}
+          root={info.root}
+          search={search}
+          onSearch={setSearch}
+          collapsed={collapsed}
+          onCollapsedChange={setCollapsed}
+          onToggleReviewed={togglePathReviewed}
+          onToggleDirectoryReviewed={toggleDirectoryReviewed}
+          treeOrder={treeOrder}
+          onHide={() => setShowFiles(false)}
+          onResize={setFilesWidth}
           hidden={!showFiles}
-        >
-          <PanelResizeHandle side="files" onResize={setFilesWidth} />
-          <div className="sidebar-header">
-            <strong>{tab === "files" ? "Repository files" : "Changed files"}</strong>
-            <span className="file-count">
-              {paths.length + (hasMessage ? 1 : 0)}
-            </span>
-            <LineStats {...groupStats(unreviewedPaths)} />
-            <button
-              className="panel-toggle"
-              aria-label="Hide file browser"
-              title="Hide file browser"
-              aria-controls="file-browser"
-              onClick={() => setShowFiles(false)}
-            >
-              ‹
-            </button>
-          </div>
-          <div className="tree-toolbar">
-            <div className="search">
-              <span aria-hidden="true">⌕</span>
-              <input
-                aria-label="Find a file"
-                placeholder="Find a file…"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-            <button
-              className="tree-action"
-              aria-label="Collapse all directories"
-              title="Collapse all directories"
-              onClick={() => setCollapsed(directoryPaths(paths))}
-            >
-              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-                <path d="M2 3.5h3l1 1h6v6.5H2z" />
-                <path d="M4.5 7.75h5" />
-              </svg>
-            </button>
-            <button
-              className="tree-action"
-              aria-label="Expand all directories"
-              title="Expand all directories"
-              onClick={() => setCollapsed([])}
-            >
-              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-                <path d="M2 3.5h3l1 1h6v6.5H2z" />
-                <path d="M4.5 7.75h5 M7 5.25v5" />
-              </svg>
-            </button>
-          </div>
-          {[false, true].map((done) => {
-            if (done && !reviewedCount) return null;
-            const groupPaths = done ? reviewedPaths : unreviewedPaths;
-            const includeMessage = hasMessage && messageReviewed === done &&
-              "commit message".includes(search.toLowerCase());
-            return (
-              <section
-                key={String(done)}
-                className={`file-section${groupPaths.length || includeMessage ? "" : " no-files"}`}
-                aria-label={done ? "Reviewed" : "Unreviewed"}
-              >
-                {done && <div className="sidebar-caption">
-                  <span className="section-label">
-                    Reviewed
-                    <span className="file-count">
-                      {reviewedCount}
-                    </span>
-                  </span>
-                  <LineStats {...groupStats(groupPaths)} />
-                </div>}
-                {(!!groupPaths.length || includeMessage) && (
-                  <BrowserTree
-                    key={`${reviewScope}:${includeMessage}:${JSON.stringify(groupPaths)}`}
-                    paths={groupPaths}
-                    entries={entries}
-                    selected={groupPaths.includes(selected) ||
-                      includeMessage && selected === MESSAGE_PATH ? selected : ""}
-                    includeMessage={includeMessage}
-                    onSelect={select}
-                    onOrderChange={done
-                      ? setReviewedTreeOrder
-                      : setUnreviewedTreeOrder}
-                    fileHref={fileHref}
-                    scrollRoot={info.root}
-                    scrollKey={JSON.stringify(["explorer", reviewScope, done])}
-                    reviewed={done}
-                    onToggleReviewed={togglePathReviewed}
-                    onToggleDirectoryReviewed={toggleDirectoryReviewed}
-                    search={search}
-                    collapsed={collapsed}
-                    onCollapse={(path, closed) =>
-                      setCollapsed((current) =>
-                        closed
-                          ? [...new Set([...current, path])]
-                          : current.filter((item) => item !== path),
-                      )
-                    }
-                  />
-                )}
-                {!done &&
-                  !groupPaths.length &&
-                  !includeMessage && (
-                    <p className="sidebar-empty">
-                      {reviewedCount
-                        ? "All reviewed."
-                        : tab === "files"
-                          ? "No files yet."
-                          : "No changed files."}
-                    </p>
-                  )}
-              </section>
-            );
-          })}
-        </aside>
+        />
         <main className="main">
-          {showTextSearch && (
-            <div className="text-search" role="search">
-              <input
-                ref={textSearchInput}
-                aria-label="Find in viewed file"
-                placeholder="Find"
-                value={textSearch}
-                onChange={(event) => setTextSearch(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    moveTextMatch(event.shiftKey ? -1 : 1);
-                  }
-                }}
-              />
-              <span aria-live="polite">
-                {textSearch
-                  ? `${textMatches.length ? activeTextMatch + 1 : 0}/${textMatches.length}`
-                  : "0/0"}
-              </span>
-              <button
-                aria-label="Previous match"
-                disabled={!textMatches.length}
-                onClick={() => moveTextMatch(-1)}
-              >
-                ↑
-              </button>
-              <button
-                aria-label="Next match"
-                disabled={!textMatches.length}
-                onClick={() => moveTextMatch(1)}
-              >
-                ↓
-              </button>
-              <button
-                aria-label="Close find"
-                onClick={() => {
-                  setShowTextSearch(false);
-                  focusViewer();
-                }}
-              >
-                ×
-              </button>
-            </div>
+          {find.open && (
+            <TextSearchBar
+              search={find}
+              onClose={() => {
+                find.close();
+                focusViewer();
+              }}
+            />
           )}
-          <div className="file-heading">
-            <a
-              className="file-path"
-              href={messageView || paths.includes(selected) ? href() : undefined}
-              onClick={onPlainClick()}
-            >
-              {messageView
-                ? `Commit message · ${comparison.target.slice(0, 7)}`
-                : selected && paths.includes(selected)
-                  ? selected
-                  : "No file selected"}
-            </a>
-            {!messageView && selected && paths.includes(selected) && (
-              <button
-                className="tree-action copy-path"
-                aria-label={copiedPath === selected ? "Copied file path" : "Copy file path"}
-                title={copiedPath === selected ? "Copied" : "Copy file path"}
-                onClick={async () => {
-                  try {
-                    await copyText(selected);
-                  } catch {
-                    return;
-                  }
-                  setCopiedPath(selected);
-                  setTimeout(
-                    () => setCopiedPath((path) => (path === selected ? undefined : path)),
-                    1500,
-                  );
-                }}
-              >
-                {copiedPath === selected ? (
-                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-                    <path d="M3 7.5l2.5 2.5L11 4.5" />
-                  </svg>
-                ) : (
-                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-                    <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
-                    <path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6" />
-                  </svg>
-                )}
-              </button>
-            )}
-            {diffView &&
-              selectedEntry?.additions != null &&
-              selectedEntry.deletions != null && (
-                <LineStats
-                  className="file-diff-stats line-stats"
-                  additions={selectedEntry.additions}
-                  deletions={selectedEntry.deletions}
-                  title="Lines changed"
-                />
-              )}
-            <div className="view-controls">
-              {tab === "changes" && !messageView && (
-                <div className="viewer-modes" role="group" aria-label="File view">
-                  {(["diff", "old", "new"] as const).map((value) => (
-                    <a
-                      key={value}
-                      href={href({ viewerMode: value })}
-                      aria-label={`View ${value}`}
-                      aria-current={viewerMode === value ? "true" : undefined}
-                      onClick={onPlainClick(() => changeViewerMode(value))}
-                    >
-                      {value === "diff" ? "Diff" : value === "old" ? "Old" : "New"}
-                    </a>
-                  ))}
-                </div>
-              )}
-              {diffView && (
-                <div className="segmented" role="group" aria-label="Diff layout">
-                  {[false, true].map((value) => (
-                    <a
-                      key={String(value)}
-                      href={href({ split: value })}
-                      aria-current={split === value ? "true" : undefined}
-                      onClick={onPlainClick(() => setSplit(value))}
-                    >
-                      {value ? "Split" : "Unified"}
-                    </a>
-                  ))}
-                </div>
-              )}
-              {fileDiff && (
-                <a
-                  className="expand-all"
-                  href={href({ expanded: !expanded })}
-                  aria-current={expanded ? "true" : undefined}
-                  title={
-                    expanded
-                      ? "Collapse unchanged lines (C)"
-                      : "Expand all hidden lines (E)"
-                  }
-                  onClick={onPlainClick(() => setExpanded((value) => !value))}
-                >
-                  {expanded ? "Collapse all" : "Expand all"}
-                </a>
-              )}
-              <button
-                className="wrap-toggle"
-                aria-label="Wrap long lines"
-                aria-pressed={wrap}
-                title="Wrap long lines (W)"
-                onClick={() => setWrap((value) => !value)}
-              >
-                Wrap
-              </button>
-            </div>
-            {(messageView || paths.includes(selected)) && (
-              <button
-                className={`review-toggle${selectedReviewed ? " reviewed" : ""}`}
-                aria-label={
-                  selectedReviewed ? "Mark unreviewed" : "Mark reviewed"
-                }
-                aria-pressed={selectedReviewed}
-                disabled={loading || comparing}
-                title={
-                  selectedReviewed
-                    ? "Move back to unreviewed"
-                    : "Move to Reviewed"
-                }
-                onClick={toggleReviewed}
-              >
-                {selectedReviewed ? "✓ Reviewed" : "Mark reviewed"}
-              </button>
-            )}
-          </div>
+          <FileHeading
+            path={messageView || paths.includes(selected) ? selected : ""}
+            title={messageView ? `Commit message · ${comparison.target.slice(0, 7)}` : ""}
+            href={href}
+            stats={diffView ? selectedEntry : undefined}
+            showModes={tab === "changes" && !messageView}
+            viewerMode={viewerMode}
+            onViewerMode={changeViewerMode}
+            diffView={diffView}
+            split={split}
+            onSplit={setSplit}
+            expandable={!!fileDiff}
+            expanded={expanded}
+            onToggleExpanded={() => setExpanded((value) => !value)}
+            wrap={wrap}
+            onToggleWrap={() => setWrap((value) => !value)}
+            reviewed={selectedReviewed}
+            reviewDisabled={loading || comparing}
+            onToggleReviewed={toggleReviewed}
+          />
           {error && (
             <div role="alert" className="error">
               {error}
@@ -1824,212 +1116,46 @@ export function Review({
             )}
           </div>
         </main>
-        <aside
-          className="comments-panel"
-          id="review-comments"
-          aria-label="Review comments"
+        <CommentsPanel
+          comments={comments}
+          highlight={highlight}
+          onHighlight={setHighlight}
+          onOpen={(comment) => void openComment(comment)}
+          editing={editing}
+          draft={draft}
+          onDraftChange={setDraft}
+          onEdit={(comment) => {
+            setEditing(comment.id);
+            setRange(null);
+            setDraft(comment.text);
+          }}
+          onDelete={(comment) => {
+            setComments((items) => items.filter((item) => item.id !== comment.id));
+            if (editing === comment.id) cancelComment();
+            setCopied(false);
+          }}
+          onSave={saveComment}
+          onCancel={cancelComment}
+          generalDraft={generalDraft}
+          onGeneralDraftChange={setGeneralDraft}
+          onSaveGeneral={saveGeneralComment}
+          newComment={!editing && range && selected ? {
+            reference: reference({
+              path: selected,
+              start,
+              end,
+              commit: messageView ? comparison.target : undefined,
+            }),
+            oldSide: range.side === "deletions",
+          } : null}
+          selecting={!!range}
+          errors={[copyError, submitError, storageError]}
+          agent={info.agent}
+          onPreview={() => setDialog("prompt")}
+          onHide={() => setShowComments(false)}
+          onResize={setCommentsWidth}
           hidden={!showComments}
-        >
-          <PanelResizeHandle side="comments" onResize={setCommentsWidth} />
-          <div className="panel-heading">
-            <h2>
-              Review comments <span>{comments.length}</span>
-            </h2>
-            <button
-              className="panel-toggle"
-              aria-label="Hide comments"
-              title="Hide comments (M)"
-              aria-controls="review-comments"
-              onClick={() => setShowComments(false)}
-            >
-              ›
-            </button>
-          </div>
-          <div className="comment-actions">
-            <button
-              className="text-button"
-              disabled={!comments.length}
-              onClick={() => setShowPrompt(true)}
-            >
-              Preview
-            </button>
-          </div>
-          <form
-            className="general-composer"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveGeneralComment();
-            }}
-          >
-            <label htmlFor="general-comment-text">General comment</label>
-            <textarea
-              id="general-comment-text"
-              placeholder="Add feedback not tied to a file…"
-              value={generalDraft}
-              onChange={(event) => setGeneralDraft(event.target.value)}
-              onKeyDown={onCmdEnter(saveGeneralComment)}
-            />
-            <div className="composer-actions">
-              <button className="primary" disabled={!generalDraft.trim()}>
-                Add general comment
-              </button>
-            </div>
-          </form>
-          <div className="comments-body">
-            {[copyError, submitError, storageError].filter(Boolean).map((message) => (
-              <p role="alert" className="error" key={message}>{message}</p>
-            ))}
-            {!comments.length && !range && (
-              <div className="comment-empty">
-                <span className="comment-icon">▤</span>
-                <h3>Your thoughts, ready for an agent.</h3>
-                <p>
-                  Select a line in the code to add a comment. Collect your
-                  feedback here, then {info.agent ? "submit" : "copy"} it as one prompt.
-                </p>
-              </div>
-            )}
-            {comments.map((comment, index) => (
-              <article
-                className={`comment${comment.general ? " general" : ""}${highlight?.id === comment.id ? " highlighted" : ""}`}
-                key={comment.id}
-                id={`comment-${comment.id}`}
-                tabIndex={comment.general ? undefined : 0}
-                aria-label={comment.general ? "General comment" : `Comment on ${reference(comment)}`}
-                onMouseEnter={() => !comment.general && setHighlight(comment)}
-                onMouseLeave={() => !comment.general && setHighlight(null)}
-                onFocus={() => !comment.general && setHighlight(comment)}
-                onBlur={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget))
-                    setHighlight(null);
-                }}
-                onClick={comment.general ? undefined : (event) => {
-                  if (!(event.target as HTMLElement).closest("button, textarea"))
-                    void openComment(comment);
-                }}
-                onKeyDown={comment.general ? undefined : (event) => {
-                  if (
-                    event.target === event.currentTarget &&
-                    (event.key === "Enter" || event.key === " ")
-                  ) {
-                    event.preventDefault();
-                    void openComment(comment);
-                  }
-                }}
-              >
-                <div className="comment-top">
-                  <span className="comment-index">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <code>{reference(comment)}</code>
-                </div>
-                {editing === comment.id ? (
-                  <div className="inline-edit">
-                    <textarea
-                      aria-label="Edit comment"
-                      autoFocus
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      onKeyDown={onCmdEnter(saveComment)}
-                    />
-                    <button
-                      onClick={() => {
-                        setEditing(undefined);
-                        setDraft("");
-                      }}
-                    >
-                      Cancel edit
-                    </button>
-                    <button
-                      className="primary"
-                      disabled={!draft.trim()}
-                      onClick={saveComment}
-                    >
-                      Save comment
-                    </button>
-                  </div>
-                ) : (
-                  <p>{comment.text}</p>
-                )}
-                <div className="comment-bottom">
-                  <span>
-                    {comment.context}
-                    {comment.side === "deletions" ? " · old side" : ""}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setEditing(comment.id);
-                      setRange(null);
-                      setDraft(comment.text);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    aria-label={`Delete comment ${index + 1}`}
-                    onClick={() => {
-                      setComments((items) =>
-                        items.filter((item) => item.id !== comment.id),
-                      );
-                      if (editing === comment.id) {
-                        setEditing(undefined);
-                        setDraft("");
-                        setRange(null);
-                      }
-                      setCopied(false);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
-            {!editing && range && selected && (
-              <form
-                className="composer"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  saveComment();
-                }}
-              >
-                <label htmlFor="comment-text">New comment</label>
-                <code>
-                  {reference({
-                    path: selected,
-                    start,
-                    end,
-                    commit: messageView ? comparison.target : undefined,
-                  })}
-                </code>
-                {range.side === "deletions" && (
-                  <small>Old side · line numbers before the change</small>
-                )}
-                <textarea
-                  id="comment-text"
-                  autoFocus
-                  placeholder="What should the agent change?"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={onCmdEnter(saveComment)}
-                />
-                <div className="composer-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRange(null);
-                      setDraft("");
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button className="primary" disabled={!draft.trim()}>
-                    Add comment
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </aside>
+        />
         <div className="panel-rail comments" hidden={showComments}>
           <button
             className="panel-toggle"
@@ -2053,138 +1179,52 @@ export function Review({
           rv {__RV_VERSION__}
         </span>
       </footer>
-      {showPrompt && (
-        <Modal className="prompt-dialog" aria-label="Prompt preview" onClose={() => setShowPrompt(false)}>
-          <div className="panel-heading">
-            <h2>Prompt preview</h2>
-            <button
-              autoFocus
-              onClick={() => setShowPrompt(false)}
-              aria-label="Close preview"
-            >
-              ✕
-            </button>
-          </div>
-          <textarea
-            aria-label="Prompt text"
-            readOnly
-            value={prompt}
-            onFocus={(event) => event.target.select()}
-          />
-          <div className="dialog-footer">
-            <span>
-              Exactly what gets {info.agent ? "submitted" : "copied"}.
-            </span>
-            <div className="dialog-actions">
-              {info.agent && (
-                <button onClick={copyPrompt}>
-                  {copyLabel}
-                </button>
-              )}
-              <button
-                className="primary"
-                disabled={submitting}
-                onClick={sendPrompt}
-              >
-                {sendLabel}
-              </button>
-            </div>
-          </div>
-        </Modal>
+      {dialog === "prompt" && (
+        <PromptDialog
+          prompt={prompt}
+          agent={info.agent}
+          copyLabel={copyLabel}
+          sendLabel={sendLabel}
+          submitting={submitting}
+          onCopy={copyPrompt}
+          onSend={sendPrompt}
+          onClose={closeDialog}
+        />
       )}
-      {showCopiedPrompt && (
-        <Modal
-          className="prompt-dialog copied-prompt-dialog"
-          aria-labelledby="copied-prompt-title"
-          onClose={() => setShowCopiedPrompt(false)}
-          onSubmit={clearCopiedReview}
-        >
-          <div className="panel-heading copied-prompt-heading">
-            <div>
-              <span className="copied-prompt-check" aria-hidden="true">✓</span>
-              <div>
-                <h2 id="copied-prompt-title">Prompt copied to clipboard</h2>
-                <p>You can clear this review or keep the comments for later.</p>
-              </div>
-            </div>
-          </div>
-          <textarea
-            aria-label="Copied prompt"
-            readOnly
-            value={prompt}
-            onFocus={(event) => event.target.select()}
-          />
-          <div className="dialog-footer">
-            <span>Clear also resets review progress.</span>
-            <div className="dialog-actions">
-              <button type="button" onClick={() => setShowCopiedPrompt(false)}>
-                Keep Comments
-              </button>
-              <button className="primary" type="submit" autoFocus>
-                Clear
-              </button>
-            </div>
-          </div>
-        </Modal>
+      {dialog === "copied" && (
+        <CopiedPromptDialog prompt={prompt} onClear={clearCopiedReview} onClose={closeDialog} />
       )}
-      {showFinder && (
+      {dialog === "finder" && (
         <FileFinder
           paths={hasMessage ? [MESSAGE_PATH, ...paths] : paths}
           reviewed={reviewedInView || []}
           onSelect={select}
           fileHref={fileHref}
-          onClose={() => setShowFinder(false)}
+          onClose={closeDialog}
         />
       )}
-      {showShortcuts && (
+      {dialog === "commands" && (
         <CommandLauncher
-          onClose={() => setShowShortcuts(false)}
+          onClose={closeDialog}
           onChoose={(command) => {
-            setShowShortcuts(false);
+            closeDialog();
             runCommand(command);
           }}
         />
       )}
-      {showLinePicker && (
-        <Modal
-          className="line-dialog"
-          aria-labelledby="line-dialog-title"
-          onClose={() => setShowLinePicker(false)}
-          onSubmit={selectLineTarget}
-        >
-          <div className="panel-heading">
-            <h2 id="line-dialog-title">Comment on a line</h2>
-            <button type="button" onClick={() => setShowLinePicker(false)} aria-label="Close line picker">✕</button>
-          </div>
-          <div className="line-dialog-body">
-            <label htmlFor="line-target">Line or range</label>
-            <input
-              id="line-target"
-              autoFocus
-              inputMode="numeric"
-              placeholder="12 or 12-15"
-              value={lineTarget}
-              onChange={(event) => {
-                setLineTarget(event.target.value);
-                setLineError("");
-              }}
-            />
-            {diffView && (
-              <label className="line-side">
-                Side
-                <select value={lineSide} onChange={(event) => setLineSide(event.target.value as "additions" | "deletions")}>
-                  <option value="additions">New side</option>
-                  <option value="deletions">Old side</option>
-                </select>
-              </label>
-            )}
-            {lineError && <p role="alert" className="line-error">{lineError}</p>}
-          </div>
-          <div className="dialog-footer">
-            <span>{selected}</span>
-            <button className="primary" disabled={!lineTarget.trim()}>Start comment</button>
-          </div>
-        </Modal>
+      {dialog === "line" && (
+        <LinePicker
+          path={selected}
+          initialTarget={range ? `${start}${end !== start ? `-${end}` : ""}` : ""}
+          initialSide={singleSide || (range?.side === "deletions" ? "deletions" : "additions")}
+          showSide={diffView}
+          lineCount={(side) => {
+            const source = side === "deletions" ? content?.oldFile : content?.newFile;
+            return source?.contents ? source.contents.split("\n").length : 0;
+          }}
+          onPick={pickLines}
+          onClose={closeDialog}
+        />
       )}
     </div>
   );

@@ -55,3 +55,7 @@ export function useOutsidePointerDown(
     return () => document.removeEventListener("pointerdown", dismiss);
   }, [active]);
 }
+
+export function isTyping(target: EventTarget | null) {
+  return (target as HTMLElement).matches("input, textarea, select, [contenteditable=true]");
+}

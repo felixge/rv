@@ -89,3 +89,53 @@ export function textSearchMatches(
   }
   return matches;
 }
+
+// Diff lines carry their side in a container attribute (split) or line type.
+function onSide(line: HTMLElement, side: "additions" | "deletions") {
+  return Boolean(line.closest(`[data-${side}]`) ||
+    line.dataset.lineType?.includes(side.slice(0, -1)));
+}
+
+export function lineSide(line: HTMLElement) {
+  return onSide(line, "deletions") ? "deletions"
+    : onSide(line, "additions") ? "additions" : undefined;
+}
+
+// Map a match to a DOM Range over the rendered, possibly tokenized, line.
+export function rangeForMatch(
+  match: TextSearchMatch,
+  renderedLines: Map<number, HTMLElement[]>,
+) {
+  const lines = renderedLines.get(match.line) || [];
+  const line = match.side
+    ? lines.find((candidate) => onSide(candidate, match.side!))
+    : lines[0];
+  if (!line) return null;
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  const range = new Range();
+  let started = false;
+  let offset = 0;
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    const nextOffset = offset + node.data.length;
+    if (!started && match.start < nextOffset) {
+      range.setStart(node, match.start - offset);
+      started = true;
+    }
+    if (started && match.end <= nextOffset) {
+      range.setEnd(node, match.end - offset);
+      return range;
+    }
+    offset = nextOffset;
+  }
+  return null;
+}
+
+export const highlightStyles = `::highlight(${textSearchMatchesHighlightName}) {
+  color: inherit;
+  background: rgba(147, 157, 171, 0.35);
+}
+::highlight(${textSearchHighlightName}) {
+  color: inherit;
+  background: #ffd75e;
+}`;
