@@ -1,40 +1,39 @@
 import type { SavedState, Source } from "../types";
 
 // Deliberately no polling, focus revalidation, websocket, or filesystem watcher.
-export const requests = new Map<string, Promise<unknown>>();
+// Responses are cached per URL for this page. A request with a new refresh
+// value supersedes the older cached responses of its route.
+const requests = new Map<string, { route: string; refresh?: string; promise: Promise<unknown> }>();
 export function api<T>(
   route: string,
   params: Record<string, string> = {},
 ): Promise<T> {
   const url = `/api/${route}?${new URLSearchParams(params)}`;
-  if (!requests.has(url))
-    requests.set(
-      url,
-      fetch(url, { headers: { "X-Rv": "1" } })
-        .then(async (response) => {
-          const data = await response.json();
-          if (!response.ok) {
-            requests.delete(url);
-            throw new Error(data.error);
-          }
-          return data;
-        })
-        .catch((error) => {
-          requests.delete(url);
-          throw error;
-        }),
-    );
-  return requests.get(url) as Promise<T>;
+  let request = requests.get(url);
+  if (!request) {
+    if (params.refresh !== undefined)
+      for (const [key, cached] of requests)
+        if (cached.route === route && cached.refresh !== params.refresh) requests.delete(key);
+    const promise = fetch(url, { headers: { "X-Rv": "1" } }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      return data;
+    });
+    promise.catch(() => requests.delete(url));
+    request = { route, refresh: params.refresh, promise };
+    requests.set(url, request);
+  }
+  return request.promise as Promise<T>;
 }
 
-export async function sendState(method: "PUT" | "DELETE", state?: SavedState) {
+export async function patchState(state: SavedState, keepalive = false) {
   const response = await fetch("/api/state", {
-    method,
+    method: "PATCH",
     headers: { "X-Rv": "1" },
-    body: method === "PUT" ? JSON.stringify(state) : undefined,
+    body: JSON.stringify(state),
+    keepalive,
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error);
+  if (!response.ok) throw new Error((await response.json()).error);
 }
 
 // One-time upgrade: older builds kept review state in the browser, which is

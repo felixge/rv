@@ -5,14 +5,14 @@ import { rememberScroll, restoreScroll } from "../lib/scroll";
 import { compareTreePaths } from "../lib/sort";
 import { MESSAGE_PATH, MESSAGE_TREE_PATH, type Entry } from "../types";
 
-export const statuses: Record<string, GitStatus> = {
+const statuses: Record<string, GitStatus> = {
   M: "modified",
   A: "added",
   D: "deleted",
   U: "untracked",
   T: "modified",
 };
-export const treeStyle = themeToTreeStyles({
+const treeStyle = themeToTreeStyles({
   type: "light",
   bg: "#f6f7f8",
   fg: "#424750",
@@ -22,7 +22,7 @@ export const treeStyle = themeToTreeStyles({
     "list.activeSelectionForeground": "#125eaa",
   },
 });
-export const inactiveTreeStyle = {
+const inactiveTreeStyle = {
   ...treeStyle,
   "--trees-focus-ring-color-override": "transparent",
 } as CSSProperties;

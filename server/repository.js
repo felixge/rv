@@ -178,7 +178,7 @@ export async function repository(directory) {
   }
 
   async function compare(mode = "working", from = "", to = "") {
-    if (!isGit) return { base: "", target: "", entries: [] };
+    if (!isGit) return { mode: "working", base: "", target: "", entries: [] };
     let base, target;
     if (mode === "working") {
       base = (await head()) || (await emptyTree());
@@ -241,6 +241,7 @@ export async function repository(directory) {
       }
     }
     return {
+      mode,
       base,
       target,
       entries: entries.sort((a, b) => a.path.localeCompare(b.path)),

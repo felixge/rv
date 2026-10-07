@@ -4,7 +4,9 @@ export type Entry = {
   additions?: number | null;
   deletions?: number | null;
 };
+export type CompareMode = "working" | "commit" | "range";
 export type Comparison = {
+  mode: CompareMode;
   base: string;
   target: string;
   entries: Entry[];
@@ -33,7 +35,8 @@ export type Comment = {
   general?: boolean;
   side?: string;
   context: string;
-  comparison?: Comparison;
+  // Older comments stored the whole Comparison, without a mode.
+  comparison?: { mode?: CompareMode; base: string; target: string };
   commit?: string;
 };
 export type Content = { oldFile: Source; newFile: Source };

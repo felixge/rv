@@ -65,12 +65,11 @@ export function viewHref({ tab, comparison, path, viewerMode, split, expanded, c
   const url = new URL(location.href);
   for (const key of ["mode", "from", "to", "path", "view", "split", "expanded"])
     url.searchParams.delete(key);
-  const mode = tab === "files" ? "files" : !comparison.target
-    ? "working" : comparison.message !== undefined ? "commit" : "range";
+  const mode = tab === "files" ? "files" : comparison.mode;
   url.searchParams.set("mode", mode);
   if (tab === "changes") url.searchParams.set("view", viewerMode);
   if (tab === "changes" && comparison.target) {
-    if (comparison.message === undefined) url.searchParams.set("from", comparison.base);
+    if (mode === "range") url.searchParams.set("from", comparison.base);
     const recent = mode === "commit"
       ? commits.findIndex((commit) => commit.id === comparison.target)
       : -1;

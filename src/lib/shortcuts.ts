@@ -1,4 +1,4 @@
-export type Shortcut = {
+type Shortcut = {
   command: Command;
   keys: string[];
   label: string;

@@ -1,6 +1,6 @@
-export type ScrollPosition = { top: number; left: number };
+type ScrollPosition = { top: number; left: number };
 
-export const scrollStores = new Map<string, Record<string, ScrollPosition>>();
+const scrollStores = new Map<string, Record<string, ScrollPosition>>();
 export function scrollStore(root: string) {
   let positions = scrollStores.get(root);
   if (positions) return positions;

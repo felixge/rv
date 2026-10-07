@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { patchState } from "../lib/api";
 import type { SavedState } from "../types";
 
 // Saves review state to the server-side disk cache, debounced. Send only
@@ -14,20 +15,11 @@ export function useSavedState(initial: SavedState, next: SavedState) {
     dirty.current = false;
     const patch = pending.current;
     pending.current = {};
-    fetch("/api/state", {
-      method: "PATCH",
-      headers: { "X-Rv": "1" },
-      body: JSON.stringify(patch),
-      keepalive,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error((await response.json()).error);
-      })
-      .catch(() => {
-        pending.current = { ...patch, ...pending.current };
-        dirty.current = true;
-        setError("Could not save review state to disk. Copy your comments before closing.");
-      });
+    patchState(patch, keepalive).catch(() => {
+      pending.current = { ...patch, ...pending.current };
+      dirty.current = true;
+      setError("Could not save review state to disk. Copy your comments before closing.");
+    });
   }).current;
 
   const serialized = JSON.stringify(next);

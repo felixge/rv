@@ -43,9 +43,9 @@ export function ReviewPalette({
   const selectedCommit = commits.find((commit) => commit.id === comparison.target);
   const current = tab === "files"
     ? "File Browser"
-    : !comparison.target
+    : comparison.mode === "working"
       ? "Uncommitted changes"
-      : comparison.message !== undefined
+      : comparison.mode === "commit"
         ? selectedCommit?.subject || `Commit ${comparison.target.slice(0, 7)}`
         : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
   const search = query.trim().toLowerCase();
@@ -63,14 +63,14 @@ export function ReviewPalette({
       title: "Uncommitted changes",
       detail: "Review uncommitted changes",
       available: isGit,
-      selected: tab === "changes" && !comparison.target,
+      selected: tab === "changes" && comparison.mode === "working",
       run: () => choose(onWorking),
     },
     {
       title: "Compare a range…",
       detail: "Choose base and target revisions",
       available: commits.length > 0,
-      selected: tab === "changes" && !!comparison.target && comparison.message === undefined,
+      selected: tab === "changes" && comparison.mode === "range",
       run: () => setRangeOpen(true),
     },
   ];
@@ -194,7 +194,7 @@ export function ReviewPalette({
                 ))}
                 {(!!choices.length || customRef) && <h2>Recent commits</h2>}
                 {choices.map((commit) => {
-                  const selected = tab === "changes" && comparison.message !== undefined &&
+                  const selected = tab === "changes" && comparison.mode === "commit" &&
                     comparison.target === commit.id;
                   return (
                     <button

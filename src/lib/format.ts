@@ -7,8 +7,8 @@ export function nameHue(name: string) {
 }
 
 // Keep relative ages stable for this page snapshot; there is no refresh timer.
-export const reviewTime = Date.now();
-export const relativeTime = new Intl.RelativeTimeFormat("en", { style: "narrow" });
+const reviewTime = Date.now();
+const relativeTime = new Intl.RelativeTimeFormat("en", { style: "narrow" });
 export function commitAge(date: string) {
   const seconds = (new Date(date).getTime() - reviewTime) / 1000;
   const units: [Intl.RelativeTimeFormatUnit, number][] = [

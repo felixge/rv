@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import DiffWorker from "@pierre/diffs/worker/worker.js?worker";
 import "./lib/backgroundFrames";
-import { api, legacyState, sendState } from "./lib/api";
+import { api, legacyState, patchState } from "./lib/api";
 import { Review } from "./review/Review";
 import type { Info, SavedState } from "./types";
 import "./style.css";
@@ -23,7 +23,7 @@ function App() {
     ])
       .then(([info, state]) => {
         const legacy = Object.keys(state).length ? null : legacyState(info.root);
-        if (legacy) void sendState("PUT", legacy).catch(() => {});
+        if (legacy) void patchState(legacy).catch(() => {});
         setLoaded({ info, state: legacy || state });
       })
       .catch((e) => setError(e.message));

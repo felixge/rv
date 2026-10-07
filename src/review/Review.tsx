@@ -66,9 +66,9 @@ export function Review({
   const [from, setFrom] = useState(saved.from);
   const [to, setTo] = useState(saved.to);
   const [comparison, setComparison] = useState<Comparison>(info.working);
-  const compareLabel = !comparison.target
+  const compareLabel = comparison.mode === "working"
     ? "Uncommitted changes"
-    : comparison.message !== undefined
+    : comparison.mode === "commit"
       ? `Commit ${comparison.target.slice(0, 7)}`
       : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
   const [comparing, setComparing] = useState(false);
@@ -194,7 +194,7 @@ export function Review({
   const messageView =
     tab === "changes" &&
     selected === MESSAGE_PATH &&
-    comparison.message !== undefined;
+    comparison.mode === "commit";
   const messageContent = useMemo<Content | undefined>(
     () => comparison.message === undefined
       ? undefined
@@ -211,15 +211,11 @@ export function Review({
   const reviewScope =
     tab === "files"
       ? "files"
-      : !comparison.target
+      : comparison.mode === "working"
         ? "working"
-        : JSON.stringify([
-            comparison.message !== undefined ? "commit" : "range",
-            comparison.base,
-            comparison.target,
-          ]);
+        : JSON.stringify([comparison.mode, comparison.base, comparison.target]);
   const reviewedInView = reviewed[reviewScope];
-  const hasMessage = tab === "changes" && comparison.message !== undefined;
+  const hasMessage = tab === "changes" && comparison.mode === "commit";
   const selectedReviewed = reviewedInView?.includes(selected) || false;
   const focusViewer = useCallback(() => {
     viewerContainer.current?.focus({ preventScroll: true });
@@ -517,23 +513,22 @@ export function Review({
       setComparing(false);
     } else {
       try {
-        const nextMode =
-          comment.context === "Working tree" || comment.context === "Uncommitted changes"
-            ? "working"
-            : comment.context.startsWith("Commit ")
-              ? "commit"
-              : "range";
-        const [base, target] = comment.context.split(" → ");
-        const result =
-          nextMode === "working"
-            ? nextInfo.working
-            : comment.comparison ||
-              await api<Comparison>("compare", {
-                mode: nextMode,
-                from: base,
-                to: nextMode === "commit" ? comment.context.slice(7) : target,
-                refresh: String(refresh),
-              });
+        // Older comments identify their comparison only by its label.
+        const { context } = comment;
+        const nextMode = comment.comparison?.mode ||
+          (context === "Working tree" || context === "Uncommitted changes" ? "working"
+            : context.startsWith("Commit ") ? "commit" : "range");
+        const [from = "", to = ""] = comment.comparison
+          ? [comment.comparison.base, comment.comparison.target]
+          : nextMode === "commit" ? ["", context.slice(7)] : context.split(" → ");
+        const result = nextMode === "working"
+          ? nextInfo.working
+          : await api<Comparison>("compare", {
+              mode: nextMode,
+              from,
+              to,
+              refresh: String(refresh),
+            });
         if (id !== comparisonRequest.current) return;
         setComparison(result);
         setMode(nextMode);
@@ -569,7 +564,9 @@ export function Review({
         text: draft.trim(),
         side: range.side,
         context: tab === "files" ? "File" : compareLabel,
-        ...(tab === "changes" ? { comparison } : {}),
+        ...(tab === "changes" ? {
+          comparison: { mode: comparison.mode, base: comparison.base, target: comparison.target },
+        } : {}),
         ...(messageView ? { commit: comparison.target } : {}),
       };
       setComments((items) => [...items, comment]);
@@ -658,7 +655,7 @@ export function Review({
       !comparison.entries.some((entry) => entry.path === selected)
     )
       setSelected(
-        comparison.message !== undefined
+        comparison.mode === "commit"
           ? MESSAGE_PATH
           : comparison.entries[0]?.path || "",
       );

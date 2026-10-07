@@ -1,4 +1,4 @@
-export function compareTreeSegments(left: string, right: string) {
+function compareTreeSegments(left: string, right: string) {
   const leftLower = left.toLowerCase();
   const rightLower = right.toLowerCase();
   const leftTokens = leftLower.match(/\d+|\D+/g) || [];

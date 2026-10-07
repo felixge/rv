@@ -59,6 +59,7 @@ test("single commit, root commit and ranges use exact historical contents", asyn
   t.after(f.cleanup);
   const repo = await repository(f.root);
   const commit = await repo.compare("commit", "", f.second);
+  assert.equal(commit.mode, "commit");
   assert.equal(commit.base, f.first);
   assert.equal(commit.target, f.second);
   assert.equal(
@@ -70,7 +71,9 @@ test("single commit, root commit and ranges use exact historical contents", asyn
     { path: "test/shipping.test.ts", status: "A", additions: 5, deletions: 0 },
   ]);
   const range = await repo.compare("range", f.first, f.third);
+  assert.equal(range.mode, "range");
   assert.equal(range.message, undefined);
+  assert.equal((await repo.compare()).mode, "working");
   assert.match(
     (await repo.file("src/shipping.ts", range.base)).contents,
     /const baseRate = 5/,
