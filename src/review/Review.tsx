@@ -390,14 +390,7 @@ export function Review({
     return {
       start: comment.start,
       end: comment.end,
-      ...(diffView
-        ? {
-            side:
-              comment.side === "deletions"
-                ? ("deletions" as const)
-                : ("additions" as const),
-          }
-        : {}),
+      ...(diffView ? { side: comment.side || "additions" } : {}),
     };
   }
   const fileDiff = useMemo(() => {
@@ -417,10 +410,7 @@ export function Review({
   });
   const annotations = comments.filter(matchesView).map((comment) => ({
     lineNumber: comment.end,
-    side:
-      comment.side === "deletions"
-        ? ("deletions" as const)
-        : ("additions" as const),
+    side: comment.side || "additions",
     metadata: comment,
   }));
   // CodeView needs a new version when the same item gets new text or annotations.

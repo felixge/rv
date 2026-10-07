@@ -33,7 +33,7 @@ export type Comment = {
   end: number;
   text: string;
   general?: boolean;
-  side?: string;
+  side?: "additions" | "deletions";
   context: string;
   // Older comments stored the whole Comparison, without a mode.
   comparison?: { mode?: CompareMode; base: string; target: string };

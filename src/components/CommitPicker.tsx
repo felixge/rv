@@ -21,32 +21,13 @@ export function CommitPicker({
   const [query, setQuery] = useState("");
   const selected = commits.find((commit) => commit.id === value);
   const search = query.trim();
-  const choices = commits.filter((commit) =>
-    `${commit.id} ${commit.subject}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
-  const options: {
-    value: string;
-    title: string;
-    detail: string;
-    date?: string;
-  }[] = choices.map((commit) => ({
-    value: commit.id,
-    title: commit.subject,
-    detail: commit.short,
-    date: commit.date,
-  }));
-  if (
-    search &&
-    !commits.some((commit) => commit.id === search || commit.short === search)
-  ) {
-    options.push({
-      value: search,
-      title: `Use ref: ${search}`,
-      detail: "Git ref",
-    });
-  }
+  const isKnown = commits.some((commit) => commit.id === search || commit.short === search);
+  const options: { value: string; title: string; detail: string; date?: string }[] = [
+    ...commits
+      .filter((commit) => `${commit.id} ${commit.subject}`.toLowerCase().includes(search.toLowerCase()))
+      .map((commit) => ({ value: commit.id, title: commit.subject, detail: commit.short, date: commit.date })),
+    ...(search && !isKnown ? [{ value: search, title: `Use ref: ${search}`, detail: "Git ref" }] : []),
+  ];
   function choose(next: string) {
     onChange(next);
     setOpen(false);

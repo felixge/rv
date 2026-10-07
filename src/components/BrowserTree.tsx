@@ -5,6 +5,10 @@ import { rememberScroll, restoreScroll } from "../lib/scroll";
 import { compareTreePaths } from "../lib/sort";
 import { MESSAGE_PATH, MESSAGE_TREE_PATH, type Entry } from "../types";
 
+// The commit message has a reserved review path; the tree shows a label.
+const toTree = (path: string) => path === MESSAGE_PATH ? MESSAGE_TREE_PATH : path;
+const fromTree = (path: string) => path === MESSAGE_TREE_PATH ? MESSAGE_PATH : path;
+
 const statuses: Record<string, GitStatus> = {
   M: "modified",
   A: "added",
@@ -91,8 +95,7 @@ export function BrowserTree({
     [includeMessage, paths],
   );
   selectRef.current = (path) => {
-    if (path === MESSAGE_TREE_PATH) onSelect(MESSAGE_PATH);
-    else if (treePaths.includes(path)) onSelect(path);
+    if (treePaths.includes(path)) onSelect(fromTree(path));
   };
   const { model } = useFileTree({
     paths: treePaths,
@@ -103,7 +106,7 @@ export function BrowserTree({
     density: "compact",
     icons: "standard",
     initialSelectedPaths: selected
-      ? [selected === MESSAGE_PATH ? MESSAGE_TREE_PATH : selected]
+      ? [toTree(selected)]
       : [],
     onSelectionChange: (items) => {
       if (syncingSelection.current) return;
@@ -118,9 +121,7 @@ export function BrowserTree({
         onOpen: (item, context) => {
           context.close({ restoreFocus: false });
           if (item.kind === "file")
-            toggleReviewedRef.current(
-              item.path === MESSAGE_TREE_PATH ? MESSAGE_PATH : item.path,
-            );
+            toggleReviewedRef.current(fromTree(item.path));
           else if (item.kind === "directory")
             toggleDirectoryRef.current(item.path);
         },
@@ -147,9 +148,7 @@ export function BrowserTree({
       onOrderChange(
         model.getVisibleRows(0, model.getVisibleCount())
           .filter((row) => row.kind === "file")
-          .map((row) =>
-            row.path === MESSAGE_TREE_PATH ? MESSAGE_PATH : row.path,
-          ),
+          .map((row) => fromTree(row.path)),
       );
     };
     const unsubscribe = model.subscribe(updateOrder);
@@ -196,7 +195,7 @@ export function BrowserTree({
     syncingExpansion.current = false;
   }, [model, search, collapsed]);
   useEffect(() => {
-    const treeSelected = selected === MESSAGE_PATH ? MESSAGE_TREE_PATH : selected;
+    const treeSelected = toTree(selected);
     syncingSelection.current = true;
     for (const path of model.getSelectedPaths()) {
       if (path !== treeSelected) model.getItem(path)?.deselect();
@@ -217,10 +216,7 @@ export function BrowserTree({
       if (row?.dataset.itemType !== "file" || !row.dataset.itemPath) return;
       event.preventDefault();
       event.stopPropagation();
-      const path = row.dataset.itemPath === MESSAGE_TREE_PATH
-        ? MESSAGE_PATH
-        : row.dataset.itemPath;
-      window.open(hrefRef.current(path), "_blank", "noopener");
+      window.open(hrefRef.current(fromTree(row.dataset.itemPath)), "_blank", "noopener");
     };
     const frame = requestAnimationFrame(() => {
       host = model.getFileTreeContainer() || undefined;
