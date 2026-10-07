@@ -1,77 +1,67 @@
 import type { Comparison, Info, ViewerMode } from "../types";
 
-export function readView(info: Info, stored: unknown) {
-  const defaults = {
-    tab: "files",
-    mode: "working",
-    from: info.commits[1]?.id || info.commits[0]?.id || "",
-    to: info.commits[0]?.id || "",
-    selected: "",
-    search: "",
-    wrap: false,
-    showFiles: true,
-    showComments: true,
-    filesWidth: 0,
-    commentsWidth: 0,
-    collapsed: [] as string[],
-    // The applied comparison is distinct from unsubmitted range picker values.
-    appliedMode: "working",
-    base: "",
-    target: "",
-  };
-  try {
-    const view: any = stored || {};
-    for (const key of Object.keys(defaults) as (keyof typeof defaults)[]) {
-      // Navigation belongs to this tab's URL, not the shared disk cache.
-      if (["tab", "mode", "from", "to", "selected", "appliedMode", "base", "target"].includes(key)) continue;
-      if (typeof view?.[key] !== typeof defaults[key]) continue;
-      if (
-        key === "collapsed" &&
-        (!Array.isArray(view[key]) ||
-          !view[key].every((path: unknown) => typeof path === "string"))
-      ) continue;
-      Object.assign(defaults, { [key]: view[key] });
-    }
-  } catch {
-    // Missing, obsolete or malformed saved state falls back to current defaults.
+const preferenceDefaults = {
+  search: "",
+  wrap: false,
+  showFiles: true,
+  showComments: true,
+  filesWidth: 0,
+  commentsWidth: 0,
+  collapsed: [] as string[],
+};
+
+// Preferences are shared through the disk cache. Obsolete or malformed values
+// fall back to the defaults.
+export function readPreferences(stored: unknown) {
+  const view = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
+  const preferences = { ...preferenceDefaults };
+  for (const key of Object.keys(preferences) as (keyof typeof preferences)[]) {
+    const value = view[key];
+    const valid = key === "collapsed"
+      ? Array.isArray(value) && value.every((path) => typeof path === "string")
+      : typeof value === typeof preferences[key];
+    if (valid) Object.assign(preferences, { [key]: value });
   }
-  // The same query parameters serve CLI entry points and in-app navigation.
+  return preferences;
+}
+
+// Navigation belongs to this tab's URL. The same query parameters serve CLI
+// entry points and in-app navigation.
+export function readLocation(info: Info) {
   const params = new URLSearchParams(location.search);
   const urlMode = params.get("mode") || "";
-  if (["working", "commit", "range"].includes(urlMode)) {
-    Object.assign(defaults, {
-      tab: "changes",
-      mode: urlMode,
-      from: params.get("from") || defaults.from,
-      to: params.get("to") || defaults.to,
-      // Match the in-app pickers, which always open on the first change.
-      selected:
-        urlMode === "working" ? info.working.entries[0]?.path || "" : "",
-      appliedMode: urlMode,
-      base: params.get("from") || "",
-      target: params.get("to") || "",
-    });
-  }
-  if (params.has("path")) defaults.selected = params.get("path")!;
+  const changes = ["working", "commit", "range"].includes(urlMode);
+  const from = (changes && params.get("from")) || "";
+  const to = (changes && params.get("to")) || "";
   const view = params.get("view");
-  const viewerMode: ViewerMode = view === "old" || view === "new" ? view : "diff";
   return {
-    ...defaults,
-    viewerMode,
+    tab: changes ? "changes" : "files",
+    mode: changes ? urlMode : "working",
+    // Draft range picker values; base/target are the applied comparison.
+    from: from || info.commits[1]?.id || info.commits[0]?.id || "",
+    to: to || info.commits[0]?.id || "",
+    base: from,
+    target: to,
+    // Match the in-app pickers, which always open on the first change.
+    selected: params.get("path") ??
+      (urlMode === "working" ? info.working.entries[0]?.path || "" : ""),
+    viewerMode: (view === "old" || view === "new" ? view : "diff") as ViewerMode,
     split: params.get("split") === "true",
     expanded: params.get("expanded") === "true",
   };
 }
 
-export function viewHref(
-  tab: string,
-  comparison: Comparison,
-  path: string,
-  viewerMode: ViewerMode,
-  split: boolean,
-  expanded: boolean,
-  commits: Info["commits"],
-) {
+export type ViewLocation = {
+  tab: string;
+  comparison: Comparison;
+  path: string;
+  viewerMode: ViewerMode;
+  split: boolean;
+  expanded: boolean;
+  commits: Info["commits"];
+};
+
+export function viewHref({ tab, comparison, path, viewerMode, split, expanded, commits }: ViewLocation) {
   const url = new URL(location.href);
   for (const key of ["mode", "from", "to", "path", "view", "split", "expanded"])
     url.searchParams.delete(key);

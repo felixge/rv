@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useListNavigation, useOutsidePointerDown } from "../lib/events";
 import { commitAge } from "../lib/format";
 import type { Info } from "../types";
 
@@ -18,7 +19,6 @@ export function CommitPicker({
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
   const selected = commits.find((commit) => commit.id === value);
   const search = query.trim();
   const choices = commits.filter((commit) =>
@@ -47,25 +47,20 @@ export function CommitPicker({
       detail: "Git ref",
     });
   }
-  useEffect(() => {
-    if (!open) return;
-    const dismiss = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [open]);
+  function choose(next: string) {
+    onChange(next);
+    setOpen(false);
+    trigger.current?.focus();
+  }
+  const { active, setActive, onKeyDown } =
+    useListNavigation(options, (option) => choose(option.value), false);
+  useOutsidePointerDown(root, open, () => setOpen(false));
   useEffect(() => {
     if (open)
       document
         .getElementById(`${id}-${active}`)
         ?.scrollIntoView({ block: "nearest" });
   }, [active, open, id]);
-  function choose(next: string) {
-    onChange(next);
-    setOpen(false);
-    trigger.current?.focus();
-  }
   return (
     <div
       className="commit-picker"
@@ -116,11 +111,7 @@ export function CommitPicker({
           <input
             autoFocus
             role="combobox"
-            aria-label={
-              label === "Commit"
-                ? "Search commits"
-                : `Search ${label.toLowerCase()} commits`
-            }
+            aria-label={`Search ${label.toLowerCase()} commits`}
             aria-expanded="true"
             aria-controls={id}
             aria-autocomplete="list"
@@ -133,23 +124,7 @@ export function CommitPicker({
               setQuery(event.target.value);
               setActive(0);
             }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault();
-                setActive((current) =>
-                  Math.max(
-                    0,
-                    Math.min(
-                      options.length - 1,
-                      current + (event.key === "ArrowDown" ? 1 : -1),
-                    ),
-                  ),
-                );
-              } else if (event.key === "Enter") {
-                event.preventDefault();
-                if (options[active]) choose(options[active].value);
-              }
-            }}
+            onKeyDown={onKeyDown}
           />
           <div
             className="commit-options"

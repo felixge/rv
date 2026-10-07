@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
+import { onPlainClick, useListNavigation } from "../lib/events";
 import { compareTreePaths, fuzzyScore } from "../lib/sort";
 import { MESSAGE_PATH } from "../types";
+import { Modal } from "./Modal";
 
 export function FileFinder({
   paths,
@@ -16,21 +18,13 @@ export function FileFinder({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
   const matches = useMemo(
     () => paths
-      .map((path, order) => {
+      .flatMap((path, order) => {
         const label = path === MESSAGE_PATH ? "Commit message" : path;
-        return { path, label, order, score: fuzzyScore(label, query) };
+        const score = fuzzyScore(label, query);
+        return score === null ? [] : [{ path, label, order, score }];
       })
-      .filter((match): match is {
-        path: string;
-        label: string;
-        order: number;
-        score: number;
-      } =>
-        match.score !== null,
-      )
       .sort((left, right) =>
         left.score - right.score ||
         compareTreePaths(left.label, right.label) ||
@@ -43,15 +37,14 @@ export function FileFinder({
     onSelect(path);
     onClose();
   };
+  const list = useListNavigation(matches, (match) => choose(match.path));
   return (
-    <div className="modal-backdrop finder-backdrop" onClick={onClose}>
-      <section
-        className="file-finder"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="file-finder-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Modal
+      backdropClassName="finder-backdrop"
+      className="file-finder"
+      aria-labelledby="file-finder-title"
+      onClose={onClose}
+    >
         <h2 id="file-finder-title">Find a file</h2>
         <div className="finder-search">
           <span aria-hidden="true">⌕</span>
@@ -62,21 +55,9 @@ export function FileFinder({
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setActive(0);
+              list.setActive(0);
             }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault();
-                if (matches.length)
-                  setActive((current) =>
-                    (current + (event.key === "ArrowDown" ? 1 : -1) + matches.length) %
-                    matches.length,
-                  );
-              } else if (event.key === "Enter" && matches[active]) {
-                event.preventDefault();
-                choose(matches[active].path);
-              }
-            }}
+            onKeyDown={list.onKeyDown}
           />
           <kbd>F</kbd>
         </div>
@@ -87,15 +68,11 @@ export function FileFinder({
               <a
                 key={match.path}
                 href={fileHref(match.path)}
-                className={index === active ? "active" : ""}
+                className={index === list.active ? "active" : ""}
                 role="option"
-                aria-selected={index === active}
-                onMouseEnter={() => setActive(index)}
-                onClick={(event) => {
-                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  choose(match.path);
-                }}
+                aria-selected={index === list.active}
+                onMouseEnter={() => list.setActive(index)}
+                onClick={onPlainClick(() => choose(match.path))}
               >
                 <span className="finder-path">{match.label}</span>
                 <span className={`finder-state${done ? " reviewed" : ""}`}>
@@ -111,7 +88,6 @@ export function FileFinder({
           <span><kbd>Enter</kbd> Open</span>
           <span><kbd>Esc</kbd> Close</span>
         </div>
-      </section>
-    </div>
+    </Modal>
   );
 }

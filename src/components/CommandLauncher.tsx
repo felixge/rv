@@ -1,24 +1,19 @@
 import { useState } from "react";
+import { useListNavigation } from "../lib/events";
 import { shortcuts, type Command } from "../lib/shortcuts";
+import { Modal } from "./Modal";
 
-export function ShortcutHelp({ onClose, onChoose }: { onClose: () => void; onChoose: (command: Command) => void }) {
+export function CommandLauncher({ onClose, onChoose }: { onClose: () => void; onChoose: (command: Command) => void }) {
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
   const normalized = query.trim().toLowerCase();
   const matches = shortcuts.filter((shortcut) =>
     `${shortcut.label} ${shortcut.category} ${shortcut.keys.join(" ")}`
       .toLowerCase()
       .includes(normalized),
   );
+  const list = useListNavigation(matches, (shortcut) => onChoose(shortcut.command));
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section
-        className="shortcut-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shortcut-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Modal className="shortcut-dialog" aria-labelledby="shortcut-title" onClose={onClose}>
         <div className="shortcut-heading">
           <div>
             <h2 id="shortcut-title">Commands</h2>
@@ -35,31 +30,20 @@ export function ShortcutHelp({ onClose, onChoose }: { onClose: () => void; onCho
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setActive(0);
+              list.setActive(0);
             }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                event.preventDefault();
-                if (matches.length)
-                  setActive((current) =>
-                    (current + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length,
-                  );
-              } else if (event.key === "Enter" && matches[active]) {
-                event.preventDefault();
-                onChoose(matches[active].command);
-              }
-            }}
+            onKeyDown={list.onKeyDown}
           />
         </div>
         <div className="shortcut-list" role="listbox" aria-label="Commands">
           {matches.map((shortcut, index) => (
             <button
               type="button"
-              className={`shortcut-row${index === active ? " active" : ""}`}
+              className={`shortcut-row${index === list.active ? " active" : ""}`}
               key={shortcut.label}
               role="option"
-              aria-selected={index === active}
-              onMouseEnter={() => setActive(index)}
+              aria-selected={index === list.active}
+              onMouseEnter={() => list.setActive(index)}
               onClick={() => onChoose(shortcut.command)}
             >
               <span className="shortcut-label">
@@ -76,7 +60,6 @@ export function ShortcutHelp({ onClose, onChoose }: { onClose: () => void; onCho
           {!matches.length && <p className="shortcut-empty">No shortcuts found.</p>}
         </div>
         <p className="shortcut-note"><kbd>↑</kbd><kbd>↓</kbd> Navigate · <kbd>Enter</kbd> Run · <kbd>Esc</kbd> Close</p>
-      </section>
-    </div>
+    </Modal>
   );
 }

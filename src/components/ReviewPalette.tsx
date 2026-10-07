@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useOutsidePointerDown } from "../lib/events";
 import { commitAge } from "../lib/format";
 import type { Comparison, Info } from "../types";
 import { CommitPicker } from "./CommitPicker";
@@ -48,27 +49,38 @@ export function ReviewPalette({
         ? selectedCommit?.subject || `Commit ${comparison.target.slice(0, 7)}`
         : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
   const search = query.trim().toLowerCase();
-  const choices = commits.filter((commit) =>
-    `${commit.id} ${commit.subject}`.toLowerCase().includes(search),
-  );
-  const scopeMatches = (value: string) =>
-    !search || value.toLowerCase().includes(search);
-  const customRef = query.trim() &&
-    !commits.some((commit) =>
-      commit.id === query.trim() || commit.short === query.trim()
-    ) &&
-    !["file browser", "uncommitted changes", "compare a range"].some((label) =>
-      label.includes(search),
-    );
+  const matches = (value: string) => value.toLowerCase().includes(search);
+  const choices = commits.filter((commit) => matches(`${commit.id} ${commit.subject}`));
+  const scopes = [
+    {
+      title: "File Browser",
+      detail: "Browse the repository at HEAD",
+      available: true,
+      selected: tab === "files",
+      run: () => choose(onFiles),
+    },
+    {
+      title: "Uncommitted changes",
+      detail: "Review uncommitted changes",
+      available: isGit,
+      selected: tab === "changes" && !comparison.target,
+      run: () => choose(onWorking),
+    },
+    {
+      title: "Compare a range…",
+      detail: "Choose base and target revisions",
+      available: commits.length > 0,
+      selected: tab === "changes" && !!comparison.target && comparison.message === undefined,
+      run: () => setRangeOpen(true),
+    },
+  ];
+  const visibleScopes = scopes.filter((scope) =>
+    scope.available && matches(`${scope.title.replace("…", "")} ${scope.detail}`));
+  const customRef = search &&
+    !commits.some((commit) => commit.id === query.trim() || commit.short === query.trim()) &&
+    !scopes.some((scope) => matches(scope.title)) ? query.trim() : "";
 
-  useEffect(() => {
-    if (!open) return;
-    const dismiss = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [open]);
+  useOutsidePointerDown(root, open, () => setOpen(false));
   useEffect(() => {
     if (!openRequest) return;
     setOpen(true);
@@ -161,81 +173,57 @@ export function ReviewPalette({
                   onKeyDown={(event) => {
                     if (event.key !== "Enter") return;
                     event.preventDefault();
-                    if (scopeMatches("File Browser Browse the repository at HEAD"))
-                      choose(onFiles);
-                    else if (isGit && scopeMatches("Uncommitted changes Review uncommitted changes"))
-                      choose(onWorking);
-                    else if (commits.length && scopeMatches("Compare a range Choose base and target revisions"))
-                      setRangeOpen(true);
+                    if (visibleScopes[0]) visibleScopes[0].run();
                     else if (choices[0]) choose(() => onCommit(choices[0].id));
-                    else if (customRef) choose(() => onCommit(query.trim()));
+                    else if (customRef) choose(() => onCommit(customRef));
                   }}
                 />
               </div>
               <div className="review-options" role="listbox" aria-label="Review scopes">
-                {scopeMatches("File Browser Browse the repository at HEAD") && (
+                {visibleScopes.map((scope) => (
                   <button
                     type="button"
                     role="option"
-                    aria-selected={tab === "files"}
-                    onClick={() => choose(onFiles)}
+                    key={scope.title}
+                    aria-selected={scope.selected}
+                    onClick={scope.run}
                   >
-                    <span className="option-check">{tab === "files" ? "✓" : ""}</span>
-                    <span><strong>File Browser</strong><small>Browse the repository at HEAD</small></span>
-                  </button>
-                )}
-                {isGit && scopeMatches("Uncommitted changes Review uncommitted changes") && (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={tab === "changes" && !comparison.target}
-                    onClick={() => choose(onWorking)}
-                  >
-                    <span className="option-check">{tab === "changes" && !comparison.target ? "✓" : ""}</span>
-                    <span><strong>Uncommitted changes</strong><small>Review uncommitted changes</small></span>
-                  </button>
-                )}
-                {!!commits.length && scopeMatches("Compare a range Choose base and target revisions") && (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={tab === "changes" && !!comparison.target && comparison.message === undefined}
-                    onClick={() => setRangeOpen(true)}
-                  >
-                    <span className="option-check">{tab === "changes" && !!comparison.target && comparison.message === undefined ? "✓" : ""}</span>
-                    <span><strong>Compare a range…</strong><small>Choose base and target revisions</small></span>
-                  </button>
-                )}
-                {(!!choices.length || customRef) && <h2>Recent commits</h2>}
-                {choices.map((commit) => (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={tab === "changes" && comparison.message !== undefined && comparison.target === commit.id}
-                    key={commit.id}
-                    onClick={() => choose(() => onCommit(commit.id))}
-                  >
-                    <span className="option-check">{tab === "changes" && comparison.target === commit.id ? "✓" : ""}</span>
-                    <span className="commit-subject">{commit.subject}</span>
-                    <code>{commit.short}</code>
-                    <time dateTime={commit.date} title={commit.date.replace("T", " ")}>{commitAge(commit.date)}</time>
+                    <span className="option-check">{scope.selected ? "✓" : ""}</span>
+                    <span><strong>{scope.title}</strong><small>{scope.detail}</small></span>
                   </button>
                 ))}
+                {(!!choices.length || customRef) && <h2>Recent commits</h2>}
+                {choices.map((commit) => {
+                  const selected = tab === "changes" && comparison.message !== undefined &&
+                    comparison.target === commit.id;
+                  return (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      key={commit.id}
+                      onClick={() => choose(() => onCommit(commit.id))}
+                    >
+                      <span className="option-check">{selected ? "✓" : ""}</span>
+                      <span className="commit-subject">{commit.subject}</span>
+                      <code>{commit.short}</code>
+                      <time dateTime={commit.date} title={commit.date.replace("T", " ")}>{commitAge(commit.date)}</time>
+                    </button>
+                  );
+                })}
                 {customRef && (
                   <button
                     type="button"
                     role="option"
                     aria-selected="false"
-                    onClick={() => choose(() => onCommit(query.trim()))}
+                    onClick={() => choose(() => onCommit(customRef))}
                   >
                     <span className="option-check" />
-                    <span><strong>Review commit {query.trim()}</strong><small>Use this Git ref</small></span>
+                    <span><strong>Review commit {customRef}</strong><small>Use this Git ref</small></span>
                   </button>
                 )}
-                {!scopeMatches("File Browser Browse the repository at HEAD") &&
-                  !scopeMatches("Uncommitted changes Review uncommitted changes") &&
-                  !scopeMatches("Compare a range Choose base and target revisions") &&
-                  !choices.length && !customRef && <p>No matching review scope.</p>}
+                {!visibleScopes.length && !choices.length && !customRef &&
+                  <p>No matching review scope.</p>}
               </div>
             </>
           )}

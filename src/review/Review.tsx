@@ -15,15 +15,18 @@ import {
 } from "@pierre/diffs";
 import { BrowserTree, directoryPaths } from "../components/BrowserTree";
 import { FileFinder } from "../components/FileFinder";
+import { LineStats } from "../components/LineStats";
+import { Modal } from "../components/Modal";
 import { PanelResizeHandle } from "../components/PanelResizeHandle";
 import { ReviewPalette } from "../components/ReviewPalette";
-import { ShortcutHelp } from "../components/ShortcutHelp";
+import { CommandLauncher } from "../components/CommandLauncher";
 import { api, loadFile } from "../lib/api";
 import { copyText } from "../lib/clipboard";
 import { nameHue } from "../lib/format";
-import { readView, viewHref } from "../lib/location";
+import { onCmdEnter, onPlainClick } from "../lib/events";
+import { readLocation, readPreferences, viewHref, type ViewLocation } from "../lib/location";
 import { rememberScroll, restoreScroll, scrollStore } from "../lib/scroll";
-import type { Command } from "../lib/shortcuts";
+import { shortcuts, type Command } from "../lib/shortcuts";
 import {
   textSearchHighlightName,
   textSearchMatches,
@@ -52,8 +55,8 @@ export function Review({
   state: SavedState;
   refreshInfo: () => Promise<Info>;
 }) {
-  const [saved] = useState(() => readView(info, state.view));
-  const [restoring, setRestoring] = useState(saved.appliedMode !== "working");
+  const [saved] = useState(() => ({ ...readPreferences(state.view), ...readLocation(info) }));
+  const [restoring, setRestoring] = useState(saved.mode !== "working");
   const [reviewed, setReviewed] = useState<Record<string, string[]>>(() =>
     state.reviewed && typeof state.reviewed === "object" ? state.reviewed : {},
   );
@@ -117,6 +120,11 @@ export function Review({
   const [collapsed, setCollapsed] = useState(saved.collapsed);
   const [highlight, setHighlight] = useState<Comment | null>(null);
   const [pendingComment, setPendingComment] = useState<Comment | null>(null);
+  const clearSelection = () => {
+    setRange(null);
+    setHighlight(null);
+    setPendingComment(null);
+  };
   const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
   const viewerContainer = useRef<HTMLDivElement>(null);
   const textSearchInput = useRef<HTMLInputElement>(null);
@@ -162,30 +170,25 @@ export function Review({
     };
   }, []);
   useEffect(() => {
-    if (saved.appliedMode !== "working")
-      void compare(saved.appliedMode, saved.target, saved.base, true).finally(
+    if (saved.mode !== "working")
+      void compare(saved.mode, { to: saved.target, from: saved.base, restore: true }).finally(
         () => setRestoring(false),
       );
   }, []);
-  const fileHref = (path: string) =>
-    viewHref(tab, comparison, path, viewerMode, split, expanded, info.commits);
+  const href = (overrides: Partial<ViewLocation> = {}) => viewHref({
+    tab, comparison, path: selected, viewerMode, split, expanded, commits: info.commits,
+    ...overrides,
+  });
+  const fileHref = (path: string) => href({ path });
   const initialURL = useRef(true);
   useEffect(() => {
     if (restoring || comparing || error) return;
-    const href = viewHref(
-      tab,
-      comparison,
-      selected,
-      viewerMode,
-      split,
-      expanded,
-      info.commits,
-    );
+    const next = href();
     if (initialURL.current) {
-      history.replaceState(null, "", href);
+      history.replaceState(null, "", next);
       initialURL.current = false;
-    } else if (href !== `${location.pathname}${location.search}${location.hash}`) {
-      history.pushState(null, "", href);
+    } else if (next !== `${location.pathname}${location.search}${location.hash}`) {
+      history.pushState(null, "", next);
     }
   }, [restoring, comparing, error, tab, comparison, selected, viewerMode, split, expanded, info.commits]);
   useEffect(() => {
@@ -263,10 +266,6 @@ export function Review({
   );
   const entries = tab === "files" ? info.working.entries : comparison.entries;
   const fileSearch = search.trim().replaceAll("\\", "/").toLowerCase();
-  const filteredPaths = useMemo(
-    () => paths.filter((path) => path.toLowerCase().includes(fileSearch)),
-    [paths, fileSearch],
-  );
   const selectedEntry = comparison.entries.find((entry) => entry.path === selected);
   const messageView =
     tab === "changes" &&
@@ -319,9 +318,7 @@ export function Review({
       }
       viewerFocusRequest.current = interactionVersion.current;
       setSelected(path);
-      setRange(null);
-      setHighlight(null);
-      setPendingComment(null);
+      clearSelection();
     },
     [selected, focusViewer],
   );
@@ -370,14 +367,13 @@ export function Review({
     };
   }, [selected, paths, tab, comparison, messageView, messageContent, restoring, contentKey, contentRevision]);
 
-  async function compare(
-    nextMode: string,
-    nextTo = to,
-    nextFrom = from,
+  async function compare(nextMode: string, {
+    to: nextTo = to,
+    from: nextFrom = from,
     restore = false,
-    refreshedInfo?: Info,
+    info: refreshedInfo,
     refresh = restore ? 0 : ++viewRefresh.current,
-  ) {
+  }: { to?: string; from?: string; restore?: boolean; info?: Info; refresh?: number } = {}) {
     const id = ++comparisonRequest.current;
     if (!restore) setContentRevision(refresh);
     if (!restore) {
@@ -386,9 +382,7 @@ export function Review({
     }
     setComparing(true);
     setError("");
-    setRange(null);
-    setHighlight(null);
-    setPendingComment(null);
+    clearSelection();
     try {
       const nextInfo = restore ? info : refreshedInfo || await refreshInfo();
       if (id !== comparisonRequest.current) return;
@@ -404,16 +398,12 @@ export function Review({
       if (id !== comparisonRequest.current) return;
       setComparison(result);
       if (nextMode === "commit") setTo(result.target);
-      setSelected((current) =>
-        restore && (tab === "files" ||
-          result.entries.some((entry) => entry.path === current))
-          ? current
-          : nextMode === "commit"
-            ? MESSAGE_PATH
-            : result.entries.some((entry) => entry.path === current)
-              ? current
-              : result.entries[0]?.path || "",
-      );
+      setSelected((current) => {
+        const kept = result.entries.some((entry) => entry.path === current);
+        if (restore && (tab === "files" || kept)) return current;
+        if (nextMode === "commit") return MESSAGE_PATH;
+        return kept ? current : result.entries[0]?.path || "";
+      });
     } catch (e) {
       if (id === comparisonRequest.current) {
         if (restore) setSelected("");
@@ -433,9 +423,7 @@ export function Review({
 
   function changeViewerMode(value: ViewerMode) {
     setViewerMode(value);
-    setRange(null);
-    setHighlight(null);
-    setPendingComment(null);
+    clearSelection();
     setShowLinePicker(false);
   }
 
@@ -785,24 +773,25 @@ export function Review({
   const viewerRange = highlightedRange && !diffView
     ? { start: highlightedRange.start, end: highlightedRange.end }
     : highlightedRange;
-  const filteredUnreviewedPaths = unreviewedPaths.filter((path) =>
-    filteredPaths.includes(path),
-  );
-  const filteredUnreviewedEntries = entries.filter((entry) =>
-    filteredUnreviewedPaths.includes(entry.path),
-  );
-  const sidebarAdditions = filteredUnreviewedEntries.reduce(
-    (sum, entry) => sum + (entry.additions || 0),
-    0,
-  );
-  const sidebarDeletions = filteredUnreviewedEntries.reduce(
-    (sum, entry) => sum + (entry.deletions || 0),
-    0,
-  );
-  const sidebarLines = filteredUnreviewedPaths.reduce(
-    (sum, path) => sum + (info.lineCounts[path] || 0),
-    0,
-  );
+  // The explorer lists current files, not changes: show their total size in
+  // lines instead of +/− change stats. Stats follow the file search.
+  function groupStats(groupPaths: string[]) {
+    const visible = groupPaths.filter((path) => path.toLowerCase().includes(fileSearch));
+    if (tab === "files") {
+      const missing = visible.some((path) => info.lineCounts[path] == null);
+      return {
+        lines: visible.reduce((sum, path) => sum + (info.lineCounts[path] || 0), 0),
+        title: `Total lines of code${missing ? "; excludes binary or unpreviewable files" : ""}`,
+      };
+    }
+    const changes = entries.filter((entry) => visible.includes(entry.path));
+    const missing = changes.some((entry) => entry.additions == null || entry.deletions == null);
+    return {
+      additions: changes.reduce((sum, entry) => sum + (entry.additions || 0), 0),
+      deletions: changes.reduce((sum, entry) => sum + (entry.deletions || 0), 0),
+      title: `Lines changed${missing ? "; excludes files with unavailable line counts (binary or unpreviewable text)" : ""}`,
+    };
+  }
 
   useEffect(() => {
     if (
@@ -1036,6 +1025,10 @@ export function Review({
     }
   }
 
+  const sendPrompt = info.agent ? submitPrompt : copyPrompt;
+  const copyLabel = copied ? "✓ Copied" : "Copy Prompt";
+  const sendLabel = !info.agent ? copyLabel : submitting ? "Submitting…" : "Submit to Agent";
+
   function changeTab(value: "files" | "changes", refresh = true) {
     if (refresh) {
       comparisonRequest.current++;
@@ -1049,9 +1042,7 @@ export function Review({
     }
     setTab(value);
     setSearch("");
-    setRange(null);
-    setHighlight(null);
-    setPendingComment(null);
+    clearSelection();
     if (
       value === "changes" &&
       !comparison.entries.some((entry) => entry.path === selected)
@@ -1070,9 +1061,7 @@ export function Review({
     setEditing(undefined);
     setDraft("");
     setGeneralDraft("");
-    setRange(null);
-    setHighlight(null);
-    setPendingComment(null);
+    clearSelection();
     setCopied(false);
   }
 
@@ -1224,7 +1213,7 @@ export function Review({
           if (!latest) return;
           setTo(latest);
           changeTab("changes", false);
-          await compare("commit", latest, from, false, nextInfo, refresh);
+          await compare("commit", { to: latest, info: nextInfo, refresh });
         })
         .catch((error) => setError((error as Error).message))
         .finally(() => {
@@ -1258,27 +1247,14 @@ export function Review({
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const typing = target.matches("input, textarea, select, [contenteditable=true]");
-      const modifier = event.metaKey || event.ctrlKey || event.altKey;
-
-      if (
-        event.key.toLowerCase() === "f" &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey
-      ) {
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === "f" || key === "g")) {
         event.preventDefault();
-        openTextSearch();
+        if (key === "f") openTextSearch();
+        else findTextMatch(event.shiftKey ? -1 : 1);
         return;
       }
-      if (
-        event.key.toLowerCase() === "g" &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey
-      ) {
-        event.preventDefault();
-        findTextMatch(event.shiftKey ? -1 : 1);
-        return;
-      }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k") {
+      if (event.metaKey && !event.ctrlKey && !event.altKey && key === "k") {
         event.preventDefault();
         setShowShortcuts(true);
         return;
@@ -1304,21 +1280,16 @@ export function Review({
         }
         return;
       }
-      if (typing || modifier || showShortcuts || showFinder || showLinePicker || showPrompt || showCopiedPrompt)
+      if (
+        typing || event.metaKey || event.ctrlKey || event.altKey ||
+        showShortcuts || showFinder || showLinePicker || showPrompt || showCopiedPrompt
+      )
         return;
 
-      const key = event.key.toLowerCase();
-      if (keySequence.current === "g") {
-        keySequence.current = "";
-        window.clearTimeout(keySequenceTimer.current);
-        if (["f", "c", "u", "r"].includes(key)) {
-          event.preventDefault();
-          runCommand(key === "r" ? "review-palette" : key === "f" ? "file-browser"
-            : key === "u" ? "uncommitted" : "recent-commit");
-        }
-        return;
-      }
-      if (key === "g") {
+      const sequence = keySequence.current;
+      keySequence.current = "";
+      window.clearTimeout(keySequenceTimer.current);
+      if (!sequence && key === "g") {
         event.preventDefault();
         keySequence.current = "g";
         keySequenceTimer.current = window.setTimeout(() => {
@@ -1326,20 +1297,13 @@ export function Review({
         }, 1000);
         return;
       }
-
-      const handled = ["?", "f", "/", "j", "k", "l", "r", "u", "y", "p", "v", "w", "b", "m", "e", "c"];
-      if (!handled.includes(key)) return;
+      const bind = sequence + key;
+      const shortcut =
+        (event.shiftKey && shortcuts.find((item) => item.bind === bind.toUpperCase())) ||
+        shortcuts.find((item) => item.bind === bind);
+      if (!shortcut) return;
       event.preventDefault();
-      const command: Command = key === "?" ? "palette" : key === "f" ? "find-file"
-        : key === "/" ? "search-files" : key === "j" ? "next-file"
-          : key === "k" ? "previous-file" : key === "l" ? "comment"
-            : key === "r" && event.shiftKey ? "refresh" : key === "r" ? "toggle-reviewed"
-              : key === "u" ? "undo" : key === "y" ? "copy-prompt"
-                : key === "p" ? "preview-prompt" : key === "v" ? "toggle-diff"
-                  : key === "w" ? "toggle-wrap" : key === "b" ? "toggle-files"
-                    : key === "m" ? "toggle-comments" : key === "e" ? "expand-diff"
-                      : "collapse-diff";
-      runCommand(command);
+      runCommand(shortcut.command);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -1376,7 +1340,7 @@ export function Review({
           onCommit={(value) => {
             setTo(value);
             changeTab("changes", false);
-            void compare("commit", value);
+            void compare("commit", { to: value });
           }}
           onRangeDraft={(nextFrom, nextTo) => {
             setMode("range");
@@ -1420,17 +1384,9 @@ export function Review({
           <button
             className="primary copy"
             disabled={!comments.length || submitting}
-            onClick={info.agent ? submitPrompt : copyPrompt}
+            onClick={sendPrompt}
           >
-            {info.agent
-              ? submitting
-                ? "Submitting…"
-                : submitted
-                  ? "✓ Submitted"
-                  : "Submit to Agent"
-              : copied
-                ? "✓ Copied"
-                : "Copy Prompt"}
+            {info.agent && submitted && !submitting ? "✓ Submitted" : sendLabel}
             <span className="count">{comments.length}</span>
           </button>
         </div>
@@ -1467,20 +1423,7 @@ export function Review({
             <span className="file-count">
               {paths.length + (hasMessage ? 1 : 0)}
             </span>
-            <span className="line-stats" aria-label={
-              tab === "files"
-                ? `${sidebarLines.toLocaleString("en-US")} total lines of code`
-                : `${sidebarAdditions} lines added, ${sidebarDeletions} lines removed`
-            }>
-              {tab === "files" ? (
-                <span className="lines-total">{sidebarLines.toLocaleString("en-US")} lines</span>
-              ) : (
-                <>
-                  <span className="lines-added">+{sidebarAdditions}</span>
-                  <span className="lines-removed">−{sidebarDeletions}</span>
-                </>
-              )}
-            </span>
+            <LineStats {...groupStats(unreviewedPaths)} />
             <button
               className="panel-toggle"
               aria-label="Hide file browser"
@@ -1529,33 +1472,6 @@ export function Review({
             const groupPaths = done ? reviewedPaths : unreviewedPaths;
             const includeMessage = hasMessage && messageReviewed === done &&
               "commit message".includes(search.toLowerCase());
-            const filteredGroupPaths = groupPaths.filter((path) =>
-              filteredPaths.includes(path),
-            );
-            const groupEntries = entries.filter((entry) =>
-              filteredGroupPaths.includes(entry.path),
-            );
-            const additions = groupEntries.reduce(
-              (sum, entry) => sum + (entry.additions || 0),
-              0,
-            );
-            const deletions = groupEntries.reduce(
-              (sum, entry) => sum + (entry.deletions || 0),
-              0,
-            );
-            const unavailable = groupEntries.some(
-              (entry) => entry.additions == null || entry.deletions == null,
-            );
-            // The explorer lists current files, not changes: show their total
-            // size in lines instead of +/− change stats.
-            const explorer = tab === "files";
-            const totalLines = filteredGroupPaths.reduce(
-              (sum, path) => sum + (info.lineCounts[path] || 0),
-              0,
-            );
-            const missingLines = filteredGroupPaths.some(
-              (path) => info.lineCounts[path] == null,
-            );
             return (
               <section
                 key={String(done)}
@@ -1569,30 +1485,7 @@ export function Review({
                       {reviewedCount}
                     </span>
                   </span>
-                  <span
-                    className="line-stats"
-                    aria-label={
-                      explorer
-                        ? `${totalLines.toLocaleString("en-US")} total lines of code`
-                        : `${additions} lines added, ${deletions} lines removed`
-                    }
-                    title={
-                      explorer
-                        ? `Total lines of code${missingLines ? "; excludes binary or unpreviewable files" : ""}`
-                        : `Lines changed${unavailable ? "; excludes files with unavailable line counts (binary or unpreviewable text)" : ""}`
-                    }
-                  >
-                    {explorer ? (
-                      <span className="lines-total">
-                        {totalLines.toLocaleString("en-US")} lines
-                      </span>
-                    ) : (
-                      <>
-                        <span className="lines-added">+{additions}</span>
-                        <span className="lines-removed">−{deletions}</span>
-                      </>
-                    )}
-                  </span>
+                  <LineStats {...groupStats(groupPaths)} />
                 </div>}
                 {(!!groupPaths.length || includeMessage) && (
                   <BrowserTree
@@ -1687,11 +1580,8 @@ export function Review({
           <div className="file-heading">
             <a
               className="file-path"
-              href={messageView || paths.includes(selected) ? fileHref(selected) : undefined}
-              onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                event.preventDefault();
-              }}
+              href={messageView || paths.includes(selected) ? href() : undefined}
+              onClick={onPlainClick()}
             >
               {messageView
                 ? `Commit message · ${comparison.target.slice(0, 7)}`
@@ -1732,14 +1622,12 @@ export function Review({
             {diffView &&
               selectedEntry?.additions != null &&
               selectedEntry.deletions != null && (
-                <span
+                <LineStats
                   className="file-diff-stats line-stats"
-                  aria-label={`${selectedEntry.additions} lines added, ${selectedEntry.deletions} lines removed`}
+                  additions={selectedEntry.additions}
+                  deletions={selectedEntry.deletions}
                   title="Lines changed"
-                >
-                  <span className="lines-added">+{selectedEntry.additions}</span>
-                  <span className="lines-removed">−{selectedEntry.deletions}</span>
-                </span>
+                />
               )}
             <div className="view-controls">
               {tab === "changes" && !messageView && (
@@ -1747,14 +1635,10 @@ export function Review({
                   {(["diff", "old", "new"] as const).map((value) => (
                     <a
                       key={value}
-                      href={viewHref(tab, comparison, selected, value, split, expanded, info.commits)}
+                      href={href({ viewerMode: value })}
                       aria-label={`View ${value}`}
                       aria-current={viewerMode === value ? "true" : undefined}
-                      onClick={(event) => {
-                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                        event.preventDefault();
-                        changeViewerMode(value);
-                      }}
+                      onClick={onPlainClick(() => changeViewerMode(value))}
                     >
                       {value === "diff" ? "Diff" : value === "old" ? "Old" : "New"}
                     </a>
@@ -1763,45 +1647,29 @@ export function Review({
               )}
               {diffView && (
                 <div className="segmented" role="group" aria-label="Diff layout">
-                  <a
-                    href={viewHref(tab, comparison, selected, viewerMode, false, expanded, info.commits)}
-                    aria-current={!split ? "true" : undefined}
-                    onClick={(event) => {
-                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                      event.preventDefault();
-                      setSplit(false);
-                    }}
-                  >
-                    Unified
-                  </a>
-                  <a
-                    href={viewHref(tab, comparison, selected, viewerMode, true, expanded, info.commits)}
-                    aria-current={split ? "true" : undefined}
-                    onClick={(event) => {
-                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                      event.preventDefault();
-                      setSplit(true);
-                    }}
-                  >
-                    Split
-                  </a>
+                  {[false, true].map((value) => (
+                    <a
+                      key={String(value)}
+                      href={href({ split: value })}
+                      aria-current={split === value ? "true" : undefined}
+                      onClick={onPlainClick(() => setSplit(value))}
+                    >
+                      {value ? "Split" : "Unified"}
+                    </a>
+                  ))}
                 </div>
               )}
               {fileDiff && (
                 <a
                   className="expand-all"
-                  href={viewHref(tab, comparison, selected, viewerMode, split, !expanded, info.commits)}
+                  href={href({ expanded: !expanded })}
                   aria-current={expanded ? "true" : undefined}
                   title={
                     expanded
                       ? "Collapse unchanged lines (C)"
                       : "Expand all hidden lines (E)"
                   }
-                  onClick={(event) => {
-                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                    event.preventDefault();
-                    setExpanded((value) => !value);
-                  }}
+                  onClick={onPlainClick(() => setExpanded((value) => !value))}
                 >
                   {expanded ? "Collapse all" : "Expand all"}
                 </a>
@@ -1999,15 +1867,7 @@ export function Review({
               placeholder="Add feedback not tied to a file…"
               value={generalDraft}
               onChange={(event) => setGeneralDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (
-                  (event.metaKey || event.ctrlKey) &&
-                  event.key === "Enter"
-                ) {
-                  event.preventDefault();
-                  saveGeneralComment();
-                }
-              }}
+              onKeyDown={onCmdEnter(saveGeneralComment)}
             />
             <div className="composer-actions">
               <button className="primary" disabled={!generalDraft.trim()}>
@@ -2016,21 +1876,9 @@ export function Review({
             </div>
           </form>
           <div className="comments-body">
-            {copyError && (
-              <p role="alert" className="error">
-                {copyError}
-              </p>
-            )}
-            {submitError && (
-              <p role="alert" className="error">
-                {submitError}
-              </p>
-            )}
-            {storageError && (
-              <p role="alert" className="error">
-                {storageError}
-              </p>
-            )}
+            {[copyError, submitError, storageError].filter(Boolean).map((message) => (
+              <p role="alert" className="error" key={message}>{message}</p>
+            ))}
             {!comments.length && !range && (
               <div className="comment-empty">
                 <span className="comment-icon">▤</span>
@@ -2082,15 +1930,7 @@ export function Review({
                       autoFocus
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (
-                          (event.metaKey || event.ctrlKey) &&
-                          event.key === "Enter"
-                        ) {
-                          event.preventDefault();
-                          saveComment();
-                        }
-                      }}
+                      onKeyDown={onCmdEnter(saveComment)}
                     />
                     <button
                       onClick={() => {
@@ -2170,15 +2010,7 @@ export function Review({
                   placeholder="What should the agent change?"
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      (event.metaKey || event.ctrlKey) &&
-                      event.key === "Enter"
-                    ) {
-                      event.preventDefault();
-                      saveComment();
-                    }
-                  }}
+                  onKeyDown={onCmdEnter(saveComment)}
                 />
                 <div className="composer-actions">
                   <button
@@ -2222,95 +2054,78 @@ export function Review({
         </span>
       </footer>
       {showPrompt && (
-        <div className="modal-backdrop" onClick={() => setShowPrompt(false)}>
-          <section
-            className="prompt-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Prompt preview"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="panel-heading">
-              <h2>Prompt preview</h2>
+        <Modal className="prompt-dialog" aria-label="Prompt preview" onClose={() => setShowPrompt(false)}>
+          <div className="panel-heading">
+            <h2>Prompt preview</h2>
+            <button
+              autoFocus
+              onClick={() => setShowPrompt(false)}
+              aria-label="Close preview"
+            >
+              ✕
+            </button>
+          </div>
+          <textarea
+            aria-label="Prompt text"
+            readOnly
+            value={prompt}
+            onFocus={(event) => event.target.select()}
+          />
+          <div className="dialog-footer">
+            <span>
+              Exactly what gets {info.agent ? "submitted" : "copied"}.
+            </span>
+            <div className="dialog-actions">
+              {info.agent && (
+                <button onClick={copyPrompt}>
+                  {copyLabel}
+                </button>
+              )}
               <button
-                autoFocus
-                onClick={() => setShowPrompt(false)}
-                aria-label="Close preview"
+                className="primary"
+                disabled={submitting}
+                onClick={sendPrompt}
               >
-                ✕
+                {sendLabel}
               </button>
             </div>
-            <textarea
-              aria-label="Prompt text"
-              readOnly
-              value={prompt}
-              onFocus={(event) => event.target.select()}
-            />
-            <div className="dialog-footer">
-              <span>
-                Exactly what gets {info.agent ? "submitted" : "copied"}.
-              </span>
-              <div className="dialog-actions">
-                {info.agent && (
-                  <button onClick={copyPrompt}>
-                    {copied ? "✓ Copied" : "Copy Prompt"}
-                  </button>
-                )}
-                <button
-                  className="primary"
-                  disabled={submitting}
-                  onClick={info.agent ? submitPrompt : copyPrompt}
-                >
-                  {info.agent
-                    ? submitting ? "Submitting…" : "Submit to Agent"
-                    : copied ? "✓ Copied" : "Copy Prompt"}
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
+          </div>
+        </Modal>
       )}
       {showCopiedPrompt && (
-        <div className="modal-backdrop" onClick={() => setShowCopiedPrompt(false)}>
-          <form
-            className="prompt-dialog copied-prompt-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="copied-prompt-title"
-            onClick={(event) => event.stopPropagation()}
-            onSubmit={(event) => {
-              event.preventDefault();
-              clearCopiedReview();
-            }}
-          >
-            <div className="panel-heading copied-prompt-heading">
+        <Modal
+          className="prompt-dialog copied-prompt-dialog"
+          aria-labelledby="copied-prompt-title"
+          onClose={() => setShowCopiedPrompt(false)}
+          onSubmit={clearCopiedReview}
+        >
+          <div className="panel-heading copied-prompt-heading">
+            <div>
+              <span className="copied-prompt-check" aria-hidden="true">✓</span>
               <div>
-                <span className="copied-prompt-check" aria-hidden="true">✓</span>
-                <div>
-                  <h2 id="copied-prompt-title">Prompt copied to clipboard</h2>
-                  <p>You can clear this review or keep the comments for later.</p>
-                </div>
+                <h2 id="copied-prompt-title">Prompt copied to clipboard</h2>
+                <p>You can clear this review or keep the comments for later.</p>
               </div>
             </div>
-            <textarea
-              aria-label="Copied prompt"
-              readOnly
-              value={prompt}
-              onFocus={(event) => event.target.select()}
-            />
-            <div className="dialog-footer">
-              <span>Clear also resets review progress.</span>
-              <div className="dialog-actions">
-                <button type="button" onClick={() => setShowCopiedPrompt(false)}>
-                  Keep Comments
-                </button>
-                <button className="primary" type="submit" autoFocus>
-                  Clear
-                </button>
-              </div>
+          </div>
+          <textarea
+            aria-label="Copied prompt"
+            readOnly
+            value={prompt}
+            onFocus={(event) => event.target.select()}
+          />
+          <div className="dialog-footer">
+            <span>Clear also resets review progress.</span>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setShowCopiedPrompt(false)}>
+                Keep Comments
+              </button>
+              <button className="primary" type="submit" autoFocus>
+                Clear
+              </button>
             </div>
-          </form>
-        </div>
+          </div>
+        </Modal>
       )}
       {showFinder && (
         <FileFinder
@@ -2322,7 +2137,7 @@ export function Review({
         />
       )}
       {showShortcuts && (
-        <ShortcutHelp
+        <CommandLauncher
           onClose={() => setShowShortcuts(false)}
           onChoose={(command) => {
             setShowShortcuts(false);
@@ -2331,52 +2146,45 @@ export function Review({
         />
       )}
       {showLinePicker && (
-        <div className="modal-backdrop" onClick={() => setShowLinePicker(false)}>
-          <form
-            className="line-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="line-dialog-title"
-            onClick={(event) => event.stopPropagation()}
-            onSubmit={(event) => {
-              event.preventDefault();
-              selectLineTarget();
-            }}
-          >
-            <div className="panel-heading">
-              <h2 id="line-dialog-title">Comment on a line</h2>
-              <button type="button" onClick={() => setShowLinePicker(false)} aria-label="Close line picker">✕</button>
-            </div>
-            <div className="line-dialog-body">
-              <label htmlFor="line-target">Line or range</label>
-              <input
-                id="line-target"
-                autoFocus
-                inputMode="numeric"
-                placeholder="12 or 12-15"
-                value={lineTarget}
-                onChange={(event) => {
-                  setLineTarget(event.target.value);
-                  setLineError("");
-                }}
-              />
-              {diffView && (
-                <label className="line-side">
-                  Side
-                  <select value={lineSide} onChange={(event) => setLineSide(event.target.value as "additions" | "deletions")}>
-                    <option value="additions">New side</option>
-                    <option value="deletions">Old side</option>
-                  </select>
-                </label>
-              )}
-              {lineError && <p role="alert" className="line-error">{lineError}</p>}
-            </div>
-            <div className="dialog-footer">
-              <span>{selected}</span>
-              <button className="primary" disabled={!lineTarget.trim()}>Start comment</button>
-            </div>
-          </form>
-        </div>
+        <Modal
+          className="line-dialog"
+          aria-labelledby="line-dialog-title"
+          onClose={() => setShowLinePicker(false)}
+          onSubmit={selectLineTarget}
+        >
+          <div className="panel-heading">
+            <h2 id="line-dialog-title">Comment on a line</h2>
+            <button type="button" onClick={() => setShowLinePicker(false)} aria-label="Close line picker">✕</button>
+          </div>
+          <div className="line-dialog-body">
+            <label htmlFor="line-target">Line or range</label>
+            <input
+              id="line-target"
+              autoFocus
+              inputMode="numeric"
+              placeholder="12 or 12-15"
+              value={lineTarget}
+              onChange={(event) => {
+                setLineTarget(event.target.value);
+                setLineError("");
+              }}
+            />
+            {diffView && (
+              <label className="line-side">
+                Side
+                <select value={lineSide} onChange={(event) => setLineSide(event.target.value as "additions" | "deletions")}>
+                  <option value="additions">New side</option>
+                  <option value="deletions">Old side</option>
+                </select>
+              </label>
+            )}
+            {lineError && <p role="alert" className="line-error">{lineError}</p>}
+          </div>
+          <div className="dialog-footer">
+            <span>{selected}</span>
+            <button className="primary" disabled={!lineTarget.trim()}>Start comment</button>
+          </div>
+        </Modal>
       )}
     </div>
   );
