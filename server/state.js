@@ -10,6 +10,11 @@ import path from "node:path";
 //   ~/Library/Caches/rv/--Users-you-repo--/state.json  (macOS)
 //
 // RV_CACHE_DIR overrides the location, mostly for tests.
+//
+// Cache files are never migrated. Bump VERSION whenever their format changes;
+// files from other versions are ignored, so rv starts from scratch.
+const VERSION = 2;
+
 function cacheDir() {
   if (process.platform === "darwin")
     return path.join(os.homedir(), "Library", "Caches", "rv");
@@ -45,8 +50,7 @@ async function readCacheFile(file, root) {
     const data = JSON.parse(await readFile(file, "utf8"));
     // Path encoding is lossy (/a/b-c and /a/b/c encode the same), so a
     // mismatched root means the file belongs to another repository.
-    if (!data || typeof data !== "object" || Array.isArray(data) || data.root !== root)
-      return null;
+    if (data?.version !== VERSION || data.root !== root) return null;
     // version/root describe the cache file, not the data it holds.
     const { version, root: _, ...rest } = data;
     return rest;
@@ -59,7 +63,7 @@ async function writeCacheFile(file, root, data) {
   await mkdir(path.dirname(file), { recursive: true });
   // Atomic write: a crash or concurrent reader never sees a half-written file.
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify({ version: 1, root, ...data }));
+  await writeFile(tmp, JSON.stringify({ version: VERSION, root, ...data }));
   await rename(tmp, file);
 }
 
@@ -71,11 +75,8 @@ export function saveState(root, state) {
   return writeCacheFile(statePath(root), root, state);
 }
 
-export async function loadAgentSession(root) {
-  const session = await readCacheFile(agentSessionPath(root), root);
-  return typeof session?.url === "string" && typeof session.token === "string"
-    ? { url: session.url, token: session.token }
-    : null;
+export function loadAgentSession(root) {
+  return readCacheFile(agentSessionPath(root), root);
 }
 
 export function saveAgentSession(root, session) {

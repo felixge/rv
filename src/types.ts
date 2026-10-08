@@ -35,8 +35,8 @@ export type Comment = {
   general?: boolean;
   side?: "additions" | "deletions";
   context: string;
-  // Older comments stored the whole Comparison, without a mode.
-  comparison?: { mode?: CompareMode; base: string; target: string };
+  // Absent for comments on repository files.
+  comparison?: { mode: CompareMode; base: string; target: string };
   commit?: string;
 };
 export type Content = { oldFile: Source; newFile: Source };

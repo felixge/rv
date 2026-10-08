@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import DiffWorker from "@pierre/diffs/worker/worker.js?worker";
 import "./lib/backgroundFrames";
-import { api, legacyState, patchState } from "./lib/api";
+import { api } from "./lib/api";
 import { Review } from "./review/Review";
 import type { Info, SavedState } from "./types";
 import "./style.css";
@@ -21,11 +21,7 @@ function App() {
       // An unavailable cache still opens the review; saving errors surface later.
       api<SavedState>("state").catch(() => ({})),
     ])
-      .then(([info, state]) => {
-        const legacy = Object.keys(state).length ? null : legacyState(info.root);
-        if (legacy) void patchState(legacy).catch(() => {});
-        setLoaded({ info, state: legacy || state });
-      })
+      .then(([info, state]) => setLoaded({ info, state }))
       .catch((e) => setError(e.message));
   }, []);
   if (!loaded)

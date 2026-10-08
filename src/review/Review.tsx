@@ -54,13 +54,9 @@ export function Review({
 }) {
   const [saved] = useState(() => ({ ...readPreferences(state.view), ...readLocation(info) }));
   const [restoring, setRestoring] = useState(saved.mode !== "working");
-  const [reviewed, setReviewed] = useState<Record<string, string[]>>(() =>
-    state.reviewed && typeof state.reviewed === "object" ? state.reviewed : {},
-  );
+  const [reviewed, setReviewed] = useState(state.reviewed || {});
   const [search, setSearch] = useState(saved.search);
-  const [comments, setComments] = useState<Comment[]>(() =>
-    Array.isArray(state.comments) ? state.comments : [],
-  );
+  const [comments, setComments] = useState(state.comments || []);
   const [tab, setTab] = useState(saved.tab);
   const [mode, setMode] = useState(saved.mode);
   const [from, setFrom] = useState(saved.from);
@@ -375,11 +371,9 @@ export function Review({
     return (
       !comment.general &&
       (tab === "files"
-        ? comment.context === "File"
-        : comment.comparison
-          ? comment.comparison.base === comparison.base &&
-            comment.comparison.target === comparison.target
-          : comment.context === compareLabel)
+        ? !comment.comparison
+        : comment.comparison?.base === comparison.base &&
+          comment.comparison.target === comparison.target)
     );
   }
   function matchesView(comment: Comment) {
@@ -475,7 +469,7 @@ export function Review({
     setRange(null);
     setHighlight(comment);
     setError("");
-    if (viewerMode !== "diff" && comment.context !== "File" && !comment.commit)
+    if (viewerMode !== "diff" && comment.comparison && !comment.commit)
       setViewerMode(comment.side === "deletions" ? "old" : "new");
     if (matchesView(comment)) {
       setPendingComment(comment);
@@ -498,25 +492,18 @@ export function Review({
       if (id === comparisonRequest.current) setError((e as Error).message);
       return;
     }
-    if (comment.context === "File") {
+    if (!comment.comparison) {
       setTab("files");
       setComparing(false);
     } else {
       try {
-        // Older comments identify their comparison only by its label.
-        const { context } = comment;
-        const nextMode = comment.comparison?.mode ||
-          (context === "Working tree" || context === "Uncommitted changes" ? "working"
-            : context.startsWith("Commit ") ? "commit" : "range");
-        const [from = "", to = ""] = comment.comparison
-          ? [comment.comparison.base, comment.comparison.target]
-          : nextMode === "commit" ? ["", context.slice(7)] : context.split(" → ");
+        const { mode: nextMode, base, target } = comment.comparison;
         const result = nextMode === "working"
           ? nextInfo.working
           : await api<Comparison>("compare", {
               mode: nextMode,
-              from,
-              to,
+              from: base,
+              to: target,
               refresh: String(refresh),
             });
         if (id !== comparisonRequest.current) return;

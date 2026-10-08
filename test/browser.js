@@ -2,11 +2,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { repository } from "../server/repository.js";
 import { createApp } from "../server/http.js";
-import { loadState, saveState } from "../server/state.js";
+import { loadState, saveState, statePath } from "../server/state.js";
 import { fixture } from "./fixture.js";
 
 const exec = promisify(execFile);
@@ -1932,27 +1932,21 @@ try {
   console.log(
     "PASS Reviewed moves files and messages without duplicates; search, selection, undo, per-comparison isolation, historical persistence and mutable-view refresh reset",
   );
-  // Old/corrupt UI state must not prevent opening or clearing comments.
-  // State now lives in the disk cache; corrupt it there while no page is open,
-  // so the app's unload flush cannot overwrite the tampered file.
+  // Cache files from another format version are ignored, never migrated.
+  // Write one while no page is open, so the app's unload flush cannot
+  // overwrite it.
   const withComment = await loadState(f.root);
   await browser("open", "about:blank");
   await new Promise((resolve) => setTimeout(resolve, 500));
-  await saveState(f.root, { ...withComment, view: "{broken" });
+  const stateFile = statePath(f.root);
+  const current = JSON.parse(await readFile(stateFile, "utf8"));
+  await writeFile(stateFile, JSON.stringify({ ...current, version: current.version - 1 }));
   await browser("open", url);
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
-  assert.equal((await comments()).length, 1);
+  assert.equal((await comments()).length, 0);
   await browser("open", "about:blank");
   await new Promise((resolve) => setTimeout(resolve, 500));
-  await saveState(f.root, { ...withComment, view: { tab: "obsolete", split: "wrong-type", collapsed: null, selected: "deleted-file.ts", futureField: "unused" } });
-  await browser("open", url);
-  await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
-  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "No file selected");
-  // The app re-saves its validated view, dropping unknown fields and values.
-  await waitState((state) => state.view && !("futureField" in state.view) && !("tab" in state.view));
-  await browser("open", "about:blank");
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  await saveState(f.root, { ...withComment, view: { tab: "changes", mode: "commit", appliedMode: "commit", target: "missing-commit", selected: "src/shipping.ts" } });
+  await saveState(f.root, withComment);
   await browser("open", `${url}/?mode=commit&to=missing-commit&path=src%2Fshipping.ts`);
   await wait("document.querySelector('[role=alert]')?.textContent.includes('Unknown commit')");
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1965,7 +1959,7 @@ try {
   assert.deepEqual(afterInvalidViewClear.reviewed, {});
   assert.deepEqual(await comments(), []);
   assert.match(await evaluate("document.querySelector('[role=alert]').textContent"), /Unknown commit/);
-  console.log("PASS corrupt/obsolete view state falls back safely; Clear removes comments without changing an invalid saved view");
+  console.log("PASS state from another format version starts fresh; Clear works after an unknown-commit error and keeps the view");
 
   const unusualPath = "src/space #?&+% ü.ts";
   await f.write(unusualPath, "export const unusual = true;\n");

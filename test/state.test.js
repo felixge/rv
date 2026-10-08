@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadState, saveState, statePath } from "../server/state.js";
@@ -37,6 +37,11 @@ test("state is a per-repository cache file in RV_CACHE_DIR", async (t) => {
   const stored = JSON.parse(await readFile(file, "utf8"));
   assert.equal(stored.root, f.root);
 
+  // Files from another format version are ignored, never migrated.
+  await writeFile(file, JSON.stringify({ ...stored, version: stored.version - 1 }));
+  assert.equal(await loadState(f.root), null);
+  await writeFile(file, JSON.stringify(stored));
+
   // Path encoding is lossy: /tmp/rv-review-x and /tmp/rv/review-x encode to
   // the same directory, so a mismatched root never serves another
   // repository's state.
@@ -55,7 +60,6 @@ test("malformed cache files are ignored, not fatal", async (t) => {
   t.after(() => delete process.env.RV_CACHE_DIR);
   const f = await fixture();
   t.after(f.cleanup);
-  const { writeFile } = await import("node:fs/promises");
   await saveState(f.root, { comments: [] });
   await writeFile(statePath(f.root), "{truncated");
   assert.equal(await loadState(f.root), null);

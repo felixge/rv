@@ -10,19 +10,9 @@ const preferenceDefaults = {
   collapsed: [] as string[],
 };
 
-// Preferences are shared through the disk cache. Obsolete or malformed values
-// fall back to the defaults.
+// Preferences are shared through the disk cache.
 export function readPreferences(stored: unknown) {
-  const view = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
-  const preferences = { ...preferenceDefaults };
-  for (const key of Object.keys(preferences) as (keyof typeof preferences)[]) {
-    const value = view[key];
-    const valid = key === "collapsed"
-      ? Array.isArray(value) && value.every((path) => typeof path === "string")
-      : typeof value === typeof preferences[key];
-    if (valid) Object.assign(preferences, { [key]: value });
-  }
-  return preferences;
+  return { ...preferenceDefaults, ...stored as Partial<typeof preferenceDefaults> };
 }
 
 // Navigation belongs to this tab's URL. The same query parameters serve CLI
