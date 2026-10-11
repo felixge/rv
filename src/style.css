@@ -989,10 +989,13 @@ button.panel-toggle:hover {
   border-radius: 6px;
   padding: 13px 12px 10px;
   box-shadow: 0 2px 3px #24344d03;
+}
+.comment:not(.general) .comment-top,
+.comment p {
   cursor: pointer;
 }
-.comment.general {
-  cursor: default;
+.comment:not(.general) .comment-top:hover code {
+  text-decoration: underline;
 }
 .comment.highlighted,
 .comment:focus-visible {

@@ -131,10 +131,6 @@ export function CommentsPanel({
               if (!event.currentTarget.contains(event.relatedTarget))
                 onHighlight(null);
             }}
-            onClick={comment.general ? undefined : (event) => {
-              if (!(event.target as HTMLElement).closest("button, textarea"))
-                onOpen(comment);
-            }}
             onKeyDown={comment.general ? undefined : (event) => {
               if (
                 event.target === event.currentTarget &&
@@ -145,7 +141,10 @@ export function CommentsPanel({
               }
             }}
           >
-            <div className="comment-top">
+            <div
+              className="comment-top"
+              onClick={comment.general ? undefined : () => onOpen(comment)}
+            >
               <span className="comment-index">
                 {String(index + 1).padStart(2, "0")}
               </span>
@@ -172,7 +171,14 @@ export function CommentsPanel({
                 </button>
               </div>
             ) : (
-              <p>{comment.text}</p>
+              <p
+                onClick={() => {
+                  // Selecting text to copy it shouldn't start an edit.
+                  if (getSelection()?.isCollapsed !== false) onEdit(comment);
+                }}
+              >
+                {comment.text}
+              </p>
             )}
             <div className="comment-bottom">
               <span>

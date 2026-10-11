@@ -436,7 +436,7 @@ try {
   }
   // Opening an opposite-side comment must reveal that side, not highlight the
   // same line number in the wrong revision.
-  await browser("click", ".comment:first-child");
+  await browser("click", ".comment:first-child .comment-top");
   await wait("document.querySelector('[aria-label=\"View old\"]').getAttribute('aria-current') === 'true'");
   await wait(`${shadow}?.querySelector('[data-selected-line]')`);
   assert.deepEqual(await highlightedLines(), [7]);
@@ -793,13 +793,19 @@ try {
   await browser("click", ".comment-marker");
   await wait("document.activeElement.classList.contains('comment')");
   await tree("README.md");
+  // The comment text edits in place; only the title opens the commented file.
+  await wait("document.querySelector('.file-path')?.textContent === 'README.md'");
   await browser("click", ".comment p");
+  await wait("document.activeElement.matches('.comment textarea[aria-label=\"Edit comment\"]')");
+  assert.equal(await evaluate("document.querySelector('.file-path').textContent"), "README.md");
+  await click("Cancel edit");
+  await browser("click", ".comment-top");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`,
   );
   assert.deepEqual(await highlightedLines(), [6]);
   console.log(
-    "PASS Files excludes deleted files; comment hover highlights line 6, marker focuses comment, click opens its file",
+    "PASS Files excludes deleted files; comment hover highlights line 6, marker focuses comment, text click edits, title click opens its file",
   );
 
   // Embedded pages may deny the async Clipboard API. The click must still copy.
@@ -1307,7 +1313,7 @@ try {
   assert.ok((await highlightedLines()).includes(3));
   assert.ok(!(await highlightedLines()).includes(4));
   await reviewScope("Uncommitted changes");
-  await browser("click", ".comment:nth-child(4) p");
+  await browser("click", ".comment:nth-child(4) .comment-top");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`,
   );
@@ -1438,14 +1444,14 @@ try {
   await browser("fill", "#comment-text", "Review this off-screen range.");
   await click("Add comment");
   await evaluate("document.querySelector('.code-view').scrollTop = 0");
-  await browser("click", ".comment:nth-child(3) p");
+  await browser("click", ".comment:nth-child(3) .comment-top");
   await wait(
     `(() => { const line = ${shadow}?.querySelector('[data-column-number="160"]'); if (!line) return false; const r = line.getBoundingClientRect(); return r.y > 160 && r.bottom < 820; })()`,
   );
   assert.deepEqual(await highlightedLines(), [160, 161, 162]);
   await expectHintAfter(162, "Review this off-screen range.");
   await tree("README.md");
-  await browser("click", ".comment:nth-child(3) p");
+  await browser("click", ".comment:nth-child(3) .comment-top");
   await wait(
     `(() => { const line = ${shadow}?.querySelector('[data-column-number="160"]'); if (!line) return false; const r = line.getBoundingClientRect(); return r.y > 160 && r.bottom < 820; })()`,
   );
@@ -1629,7 +1635,7 @@ try {
   await wait("document.querySelectorAll('.comment').length === 3");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`);
   assert.match(await evaluate("document.querySelector('.file-path').textContent"), /Commit message/);
-  await browser("click", ".comment:last-child p");
+  await browser("click", ".comment:last-child .comment-top");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('Charge 12 for international orders.')`,
   );
@@ -1759,7 +1765,7 @@ try {
   await capture("all-reviewed");
   await browser("reload");
   await wait("document.querySelector('.comment')");
-  await browser("click", ".comment p");
+  await browser("click", ".comment .comment-top");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('No files changed.')`,
   );
