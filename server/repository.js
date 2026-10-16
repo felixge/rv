@@ -17,7 +17,9 @@ export async function repository(directory) {
     (
       await exec("git", ["--no-optional-locks", "-C", root, ...args], {
         encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
+        // Metadata (file lists and diff stats) scales with the repository, not
+        // the preview size. Individual file contents keep their own bound below.
+        maxBuffer: Infinity,
         env: { ...process.env, GIT_PAGER: "cat", GIT_LITERAL_PATHSPECS: "1" },
         ...options,
       })

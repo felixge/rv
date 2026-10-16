@@ -54,6 +54,35 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   );
 });
 
+test("repository metadata larger than 16 MiB is not truncated", async (t) => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  // Populate the index without creating thousands of files on disk. Skip-worktree
+  // keeps these entries in the file list despite their absence from the checkout.
+  const prefix = "large/" + `${"x".repeat(180)}/`.repeat(5);
+  const names = Array.from({ length: 20000 }, (_, i) => `${prefix}${i}.txt`);
+  const paths = `${names.join("\0")}\0`;
+  assert.ok(Buffer.byteLength(paths) > 16 * 1024 * 1024);
+  const blob = f.git("rev-parse", "HEAD:README.md");
+  execFileSync("git", ["-C", f.root, "update-index", "--index-info"], {
+    input: names.map((name) => `100644 ${blob}\t${name}\n`).join(""),
+  });
+  execFileSync("git", ["-C", f.root, "update-index", "--skip-worktree", "-z", "--stdin"], {
+    input: paths,
+  });
+  const info = await (await repository(f.root)).info();
+  const files = new Set(info.files);
+  const entries = new Map(info.working.entries.map((entry) => [entry.path, entry]));
+  for (const name of names) {
+    assert.ok(files.has(name));
+    assert.equal(info.lineCounts[name], null);
+    assert.deepEqual(entries.get(name), {
+      path: name, status: "A", additions: 3, deletions: 0,
+    });
+  }
+  assert.equal(info.lineCounts["README.md"], 3);
+});
+
 test("single commit, root commit and ranges use exact historical contents", async (t) => {
   const f = await fixture();
   t.after(f.cleanup);
