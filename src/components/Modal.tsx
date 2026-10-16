@@ -1,38 +1,36 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import { splitProps, type JSX } from "solid-js";
 
 // A dialog over a backdrop that closes it. With onSubmit, the dialog is a form.
-export function Modal({
-  onClose,
-  onSubmit,
-  backdropClassName = "",
-  children,
-  ...props
-}: Omit<HTMLAttributes<HTMLElement>, "onSubmit"> & {
-  onClose: () => void;
-  onSubmit?: () => void;
-  backdropClassName?: string;
-  children: ReactNode;
-}) {
-  const dialog = { role: "dialog", "aria-modal": true, ...props };
+export function Modal(
+  props: Omit<JSX.HTMLAttributes<HTMLElement>, "onSubmit"> & {
+    onClose: () => void;
+    onSubmit?: () => void;
+    backdropClass?: string;
+    children: JSX.Element;
+  },
+) {
+  const [local, dialog] = splitProps(props, ["onClose", "onSubmit", "backdropClass", "children"]);
   return (
     <div
-      className={`modal-backdrop ${backdropClassName}`.trim()}
+      class={`modal-backdrop ${local.backdropClass || ""}`.trim()}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) local.onClose();
       }}
     >
-      {onSubmit ? (
+      {local.onSubmit ? (
         <form
-          {...dialog}
+          role="dialog"
+          aria-modal="true"
+          {...(dialog as JSX.HTMLAttributes<HTMLFormElement>)}
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit();
+            local.onSubmit!();
           }}
         >
-          {children}
+          {local.children}
         </form>
       ) : (
-        <section {...dialog}>{children}</section>
+        <section role="dialog" aria-modal="true" {...dialog}>{local.children}</section>
       )}
     </div>
   );

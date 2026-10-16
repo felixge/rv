@@ -1,147 +1,149 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { useListNavigation, useOutsidePointerDown } from "../lib/events";
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show } from "solid-js";
+import { autofocus, useListNavigation, useOutsidePointerDown } from "../lib/events";
 import { commitAge } from "../lib/format";
 import type { Info } from "../types";
 
-export function CommitPicker({
-  label,
-  value,
-  commits,
-  onChange,
-}: {
+export function CommitPicker(props: {
   label: string;
   value: string;
   commits: Info["commits"];
   onChange: (value: string) => void;
 }) {
-  const id = useId();
-  const root = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const selected = commits.find((commit) => commit.id === value);
-  const search = query.trim();
-  const isKnown = commits.some((commit) => commit.id === search || commit.short === search);
-  const options: { value: string; title: string; detail: string; date?: string }[] = [
-    ...commits
-      .filter((commit) => `${commit.id} ${commit.subject}`.toLowerCase().includes(search.toLowerCase()))
-      .map((commit) => ({ value: commit.id, title: commit.subject, detail: commit.short, date: commit.date })),
-    ...(search && !isKnown ? [{ value: search, title: `Use ref: ${search}`, detail: "Git ref" }] : []),
-  ];
+  const id = createUniqueId();
+  let root!: HTMLDivElement;
+  let trigger!: HTMLButtonElement;
+  const [open, setOpen] = createSignal(false);
+  const [query, setQuery] = createSignal("");
+  const selected = () => props.commits.find((commit) => commit.id === props.value);
+  const options = createMemo(() => {
+    const search = query().trim();
+    const isKnown = props.commits.some((commit) => commit.id === search || commit.short === search);
+    return [
+      ...props.commits
+        .filter((commit) => `${commit.id} ${commit.subject}`.toLowerCase().includes(search.toLowerCase()))
+        .map((commit) => ({ value: commit.id, title: commit.subject, detail: commit.short, date: commit.date as string | undefined })),
+      ...(search && !isKnown ? [{ value: search, title: `Use ref: ${search}`, detail: "Git ref", date: undefined }] : []),
+    ];
+  });
   function choose(next: string) {
-    onChange(next);
+    props.onChange(next);
     setOpen(false);
-    trigger.current?.focus();
+    trigger.focus();
   }
   const { active, setActive, onKeyDown } =
     useListNavigation(options, (option) => choose(option.value), false);
-  useOutsidePointerDown(root, open, () => setOpen(false));
-  useEffect(() => {
-    if (open)
+  useOutsidePointerDown(() => root, open, () => setOpen(false));
+  createEffect(on([active, open], () => {
+    if (open())
       document
-        .getElementById(`${id}-${active}`)
+        .getElementById(`${id}-${active()}`)
         ?.scrollIntoView({ block: "nearest" });
-  }, [active, open, id]);
+  }));
   return (
     <div
-      className="commit-picker"
+      class="commit-picker"
       ref={root}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      onFocusOut={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
       }}
-      onKeyDown={(event) => {
+      // Native, so stopping propagation keeps Escape from global shortcuts.
+      on:keydown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
           setOpen(false);
-          trigger.current?.focus();
+          trigger.focus();
         }
       }}
     >
       <button
         type="button"
         ref={trigger}
-        className="commit-trigger"
-        aria-label={`${label} revision`}
-        aria-expanded={open}
+        class="commit-trigger"
+        aria-label={`${props.label} revision`}
+        aria-expanded={open()}
         aria-haspopup="dialog"
-        title={
-          selected
-            ? `${selected.subject} (${selected.short}) · ${selected.date.replace("T", " ")}`
-            : value
-        }
+        title={(() => {
+          const commit = selected();
+          return commit
+            ? `${commit.subject} (${commit.short}) · ${commit.date.replace("T", " ")}`
+            : props.value;
+        })()}
         onClick={() => {
           setQuery("");
           setActive(0);
-          setOpen(!open);
+          setOpen(!open());
         }}
       >
-        <span className="revision-label">{label}</span>
-        <span className="revision-value">
-          {selected?.subject || value || "Choose commit"}
+        <span class="revision-label">{props.label}</span>
+        <span class="revision-value">
+          {selected()?.subject || props.value || "Choose commit"}
         </span>
-        {selected && <code>{selected.short}</code>}
+        <Show when={selected()}>{(commit) => <code>{commit().short}</code>}</Show>
         <span aria-hidden="true">⌄</span>
       </button>
-      {open && (
+      <Show when={open()}>
         <div
-          className="commit-popover"
+          class="commit-popover"
           role="dialog"
-          aria-label={`Choose ${label.toLowerCase()} revision`}
+          aria-label={`Choose ${props.label.toLowerCase()} revision`}
         >
           <input
-            autoFocus
+            ref={autofocus}
             role="combobox"
-            aria-label={`Search ${label.toLowerCase()} commits`}
+            aria-label={`Search ${props.label.toLowerCase()} commits`}
             aria-expanded="true"
             aria-controls={id}
             aria-autocomplete="list"
             aria-activedescendant={
-              options[active] ? `${id}-${active}` : undefined
+              options()[active()] ? `${id}-${active()}` : undefined
             }
             placeholder="Search commits or enter a Git ref…"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
+            value={query()}
+            onInput={(event) => {
+              setQuery(event.currentTarget.value);
               setActive(0);
             }}
             onKeyDown={onKeyDown}
           />
           <div
-            className="commit-options"
+            class="commit-options"
             id={id}
             role="listbox"
-            aria-label={`${label} commits`}
+            aria-label={`${props.label} commits`}
           >
-            {options.map((option, index) => (
-              <button
-                key={option.value}
-                id={`${id}-${index}`}
-                type="button"
-                role="option"
-                aria-selected={option.value === value}
-                tabIndex={-1}
-                className={index === active ? "active" : ""}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => choose(option.value)}
-              >
-                <span>{option.title}</span>
-                <code>{option.detail}</code>
-                {option.date && (
-                  <time
-                    className="commit-time"
-                    dateTime={option.date}
-                    title={option.date.replace("T", " ")}
-                  >
-                    {commitAge(option.date)}
-                  </time>
-                )}
-              </button>
-            ))}
+            <For each={options()}>
+              {(option, index) => (
+                <button
+                  id={`${id}-${index()}`}
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === props.value}
+                  tabIndex={-1}
+                  class={index() === active() ? "active" : ""}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => choose(option.value)}
+                >
+                  <span>{option.title}</span>
+                  <code>{option.detail}</code>
+                  <Show when={option.date}>
+                    {(date) => (
+                      <time
+                        class="commit-time"
+                        datetime={date()}
+                        title={date().replace("T", " ")}
+                      >
+                        {commitAge(date())}
+                      </time>
+                    )}
+                  </Show>
+                </button>
+              )}
+            </For>
           </div>
           <p>Search by message or hash · Or enter a branch, tag, or HEAD~2</p>
         </div>
-      )}
+      </Show>
     </div>
   );
 }

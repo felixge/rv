@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
 import { defineConfig } from "vite";
+import solid from "vite-plugin-solid";
 
 function version() {
   try {
@@ -17,7 +18,7 @@ function version() {
 
 export default defineConfig({
   define: { __RV_VERSION__: JSON.stringify(version()) },
-  plugins: [{
+  plugins: [solid(), {
     name: "precompress-assets",
     generateBundle: {
       // Vite must finish replacing preload markers before we compress chunks.

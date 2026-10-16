@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createSignal, For, Show } from "solid-js";
 import { LineStats } from "../components/LineStats";
 import { copyText } from "../lib/clipboard";
 import { onPlainClick } from "../lib/events";
@@ -7,26 +7,7 @@ import type { Entry, ViewerMode } from "../types";
 
 // The viewed file's path, change stats, view controls and review toggle. The
 // all-files diff shows a summary here instead; each file has a DiffFileHeader.
-export function FileHeading({
-  path,
-  title,
-  summary,
-  href,
-  showModes,
-  viewerMode,
-  onViewerMode,
-  diffView,
-  split,
-  onSplit,
-  expandable,
-  expanded,
-  onToggleExpanded,
-  wrap,
-  onToggleWrap,
-  reviewed,
-  reviewDisabled,
-  onToggleReviewed,
-}: {
+export function FileHeading(props: {
   // The selected file or commit message; empty when nothing is shown.
   path: string;
   // Replaces the path, for the commit message.
@@ -50,87 +31,87 @@ export function FileHeading({
   onToggleReviewed: () => void;
 }) {
   return (
-    <div className="file-heading">
-      {summary ? (
-        <span className="files-summary">{summary}</span>
-      ) : (
-        <a className="file-path" href={path ? href() : undefined} onClick={onPlainClick()}>
-          {title || path || "No file selected"}
-        </a>
-      )}
-      {path && !title && !summary && <CopyPathButton path={path} />}
-      <div className="view-controls">
-        {showModes && (
-          <div className="viewer-modes" role="group" aria-label="File view">
-            {(["diff", "old", "new"] as const).map((value) => (
-              <a
-                key={value}
-                href={href({ viewerMode: value })}
-                aria-label={`View ${value}`}
-                aria-current={viewerMode === value ? "true" : undefined}
-                onClick={onPlainClick(() => onViewerMode(value))}
-              >
-                {value === "diff" ? "Diff" : value === "old" ? "Old" : "New"}
-              </a>
-            ))}
-          </div>
-        )}
-        {diffView && (
-          <div className="segmented" role="group" aria-label="Diff layout">
-            {[false, true].map((value) => (
-              <a
-                key={String(value)}
-                href={href({ split: value })}
-                aria-current={split === value ? "true" : undefined}
-                onClick={onPlainClick(() => onSplit(value))}
-              >
-                {value ? "Split" : "Unified"}
-              </a>
-            ))}
-          </div>
-        )}
-        {expandable && (
-          <a
-            className="expand-all"
-            href={href({ expanded: !expanded })}
-            aria-current={expanded ? "true" : undefined}
-            title={expanded ? "Collapse unchanged lines (C)" : "Expand all hidden lines (E)"}
-            onClick={onPlainClick(onToggleExpanded)}
-          >
-            {expanded ? "Collapse all" : "Expand all"}
+    <div class="file-heading">
+      <Show
+        when={props.summary}
+        fallback={
+          <a class="file-path" href={props.path ? props.href() : undefined} onClick={onPlainClick()}>
+            {props.title || props.path || "No file selected"}
           </a>
-        )}
+        }
+      >
+        <span class="files-summary">{props.summary}</span>
+      </Show>
+      <Show when={props.path && !props.title && !props.summary}>
+        <CopyPathButton path={props.path} />
+      </Show>
+      <div class="view-controls">
+        <Show when={props.showModes}>
+          <div class="viewer-modes" role="group" aria-label="File view">
+            <For each={["diff", "old", "new"] as const}>
+              {(value) => (
+                <a
+                  href={props.href({ viewerMode: value })}
+                  aria-label={`View ${value}`}
+                  aria-current={props.viewerMode === value ? "true" : undefined}
+                  onClick={onPlainClick(() => props.onViewerMode(value))}
+                >
+                  {value === "diff" ? "Diff" : value === "old" ? "Old" : "New"}
+                </a>
+              )}
+            </For>
+          </div>
+        </Show>
+        <Show when={props.diffView}>
+          <div class="segmented" role="group" aria-label="Diff layout">
+            <For each={[false, true]}>
+              {(value) => (
+                <a
+                  href={props.href({ split: value })}
+                  aria-current={props.split === value ? "true" : undefined}
+                  onClick={onPlainClick(() => props.onSplit(value))}
+                >
+                  {value ? "Split" : "Unified"}
+                </a>
+              )}
+            </For>
+          </div>
+        </Show>
+        <Show when={props.expandable}>
+          <a
+            class="expand-all"
+            href={props.href({ expanded: !props.expanded })}
+            aria-current={props.expanded ? "true" : undefined}
+            title={props.expanded ? "Collapse unchanged lines (C)" : "Expand all hidden lines (E)"}
+            onClick={onPlainClick(props.onToggleExpanded)}
+          >
+            {props.expanded ? "Collapse all" : "Expand all"}
+          </a>
+        </Show>
         <button
-          className="wrap-toggle"
+          class="wrap-toggle"
           aria-label="Wrap long lines"
-          aria-pressed={wrap}
+          aria-pressed={props.wrap}
           title="Wrap long lines (W)"
-          onClick={onToggleWrap}
+          onClick={props.onToggleWrap}
         >
           Wrap
         </button>
       </div>
-      {path && !summary && (
-        <ReviewToggle reviewed={reviewed} disabled={reviewDisabled} onToggle={onToggleReviewed} />
-      )}
+      <Show when={props.path && !props.summary}>
+        <ReviewToggle
+          reviewed={props.reviewed}
+          disabled={props.reviewDisabled}
+          onToggle={props.onToggleReviewed}
+        />
+      </Show>
     </div>
   );
 }
 
 // A file's sticky header in the all-files diff. Its background shows whether
 // the file is in the unreviewed or the reviewed section.
-export function DiffFileHeader({
-  path,
-  title,
-  href,
-  stats,
-  notice,
-  current,
-  reviewed,
-  reviewDisabled,
-  onSelect,
-  onToggleReviewed,
-}: {
+export function DiffFileHeader(props: {
   path: string;
   // Replaces the path, for the commit message.
   title: string;
@@ -145,60 +126,65 @@ export function DiffFileHeader({
 }) {
   return (
     <div
-      className={`file-heading diff-file-heading${reviewed ? " reviewed" : ""}`}
-      data-path={path}
-      data-current={current ? "true" : undefined}
+      class={`file-heading diff-file-heading${props.reviewed ? " reviewed" : ""}`}
+      data-path={props.path}
+      data-current={props.current ? "true" : undefined}
     >
-      <a className="file-path" href={href} onClick={onPlainClick(onSelect)}>
-        {title || path}
+      <a class="file-path" href={props.href} onClick={onPlainClick(() => props.onSelect())}>
+        {props.title || props.path}
       </a>
-      {!title && <CopyPathButton path={path} />}
-      {stats?.additions != null && stats.deletions != null && (
+      <Show when={!props.title}>
+        <CopyPathButton path={props.path} />
+      </Show>
+      <Show when={props.stats?.additions != null && props.stats.deletions != null}>
         <LineStats
-          className="file-diff-stats line-stats"
-          additions={stats.additions}
-          deletions={stats.deletions}
+          class="file-diff-stats line-stats"
+          additions={props.stats!.additions!}
+          deletions={props.stats!.deletions!}
           title="Lines changed"
         />
-      )}
-      {notice && <span className="file-notice">{notice}</span>}
-      <ReviewToggle reviewed={reviewed} disabled={reviewDisabled} onToggle={onToggleReviewed} />
+      </Show>
+      <Show when={props.notice}>
+        <span class="file-notice">{props.notice}</span>
+      </Show>
+      <ReviewToggle
+        reviewed={props.reviewed}
+        disabled={props.reviewDisabled}
+        onToggle={props.onToggleReviewed}
+      />
     </div>
   );
 }
 
-function ReviewToggle({
-  reviewed,
-  disabled,
-  onToggle,
-}: {
+function ReviewToggle(props: {
   reviewed: boolean;
   disabled: boolean;
   onToggle: () => void;
 }) {
   return (
     <button
-      className={`review-toggle${reviewed ? " reviewed" : ""}`}
-      aria-label={reviewed ? "Mark unreviewed" : "Mark reviewed"}
-      aria-pressed={reviewed}
-      disabled={disabled}
-      title={reviewed ? "Move back to unreviewed" : "Move to Reviewed"}
-      onClick={onToggle}
+      class={`review-toggle${props.reviewed ? " reviewed" : ""}`}
+      aria-label={props.reviewed ? "Mark unreviewed" : "Mark reviewed"}
+      aria-pressed={props.reviewed}
+      disabled={props.disabled}
+      title={props.reviewed ? "Move back to unreviewed" : "Move to Reviewed"}
+      onClick={() => props.onToggle()}
     >
-      {reviewed ? "✓ Reviewed" : "Mark reviewed"}
+      {props.reviewed ? "✓ Reviewed" : "Mark reviewed"}
     </button>
   );
 }
 
-function CopyPathButton({ path }: { path: string }) {
-  const [copiedPath, setCopiedPath] = useState<string>();
-  const copied = copiedPath === path;
+function CopyPathButton(props: { path: string }) {
+  const [copiedPath, setCopiedPath] = createSignal<string>();
+  const copied = () => copiedPath() === props.path;
   return (
     <button
-      className="tree-action copy-path"
-      aria-label={copied ? "Copied file path" : "Copy file path"}
-      title={copied ? "Copied" : "Copy file path"}
+      class="tree-action copy-path"
+      aria-label={copied() ? "Copied file path" : "Copy file path"}
+      title={copied() ? "Copied" : "Copy file path"}
       onClick={async () => {
+        const path = props.path;
         try {
           await copyText(path);
         } catch {
@@ -208,16 +194,19 @@ function CopyPathButton({ path }: { path: string }) {
         setTimeout(() => setCopiedPath((current) => (current === path ? undefined : current)), 1500);
       }}
     >
-      {copied ? (
+      <Show
+        when={copied()}
+        fallback={
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
+            <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
+            <path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6" />
+          </svg>
+        }
+      >
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
           <path d="M3 7.5l2.5 2.5L11 4.5" />
         </svg>
-      ) : (
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-          <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
-          <path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6" />
-        </svg>
-      )}
+      </Show>
     </button>
   );
 }

@@ -1274,6 +1274,8 @@ try {
   await capture("commit-range");
   // Custom refs remain supported, without relying on native datalist behavior.
   await reviewRange();
+  // Opening straight into the range pickers keeps focus on the trigger.
+  assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), "Review scope");
   await click("Base revision");
   await browser("fill", '[aria-label="Search base commits"]', "HEAD~2");
   await capture("commit-picker-ref");
@@ -1923,6 +1925,12 @@ try {
   assert.match(await reviewedText(), /Commit message/);
   assert.doesNotMatch(await reviewedText(), /shipping\.ts/);
   await reviewScope("File Browser");
+  // The explorer restores its earlier scroll position, past src/.
+  await wait(`(() => {
+    const scroller = ${explorerScroller};
+    if (scroller) scroller.scrollTop = 0;
+    return scroller?.getRootNode().querySelector('[role=treeitem][aria-label="shipping.ts"]');
+  })()`);
   await tree("shipping.ts");
   await wait(
     `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 75')`,
@@ -2015,6 +2023,7 @@ try {
       : `const value${index + 1} = ${index + 1};`,
   );
   await f.write("src/long.ts", `${longLines.join("\n")}\n`);
+  await f.write("src/other.ts", 'export const other = "const";\n');
   await browser("open", `${url}/?mode=files&path=src%2Flong.ts`);
   await wait(`${heading}.querySelector('.file-path')?.textContent === 'src/long.ts'`);
   assert.equal(
@@ -2067,6 +2076,14 @@ try {
     { text: '= "const', line: 420, acrossTokens: true },
   );
   await capture("occurrence-search");
+  // Selecting another file keeps highlighting once its viewer mounts.
+  await tree("other.ts");
+  await wait(`${heading}.querySelector('.file-path')?.textContent === 'src/other.ts'`);
+  const otherFileOccurrence = await activeSearchHighlight();
+  assert.deepEqual(
+    { text: otherFileOccurrence.text, line: otherFileOccurrence.line },
+    { text: '= "const', line: 1 },
+  );
   await browser("press", "Escape");
   assert.equal(await evaluate("Boolean(document.querySelector('.text-search'))"), false);
   assert.equal(await evaluate("CSS.highlights.has('rv-text-search')"), false);
@@ -2180,6 +2197,8 @@ try {
   assert.equal(await evaluate(`getComputedStyle(${syncHeader("sync/a.ts")}).backgroundColor`), "rgb(255, 245, 220)");
   await reviewViewed("Mark reviewed");
   await wait(`${currentHeading}?.dataset.path === 'sync/b.ts' && ${selectedTreeItem} === 'b.ts'`);
+  // The selection changes before the scroll to it settles; End must follow it.
+  await wait(`Math.abs(${syncHeader("sync/b.ts")}?.getBoundingClientRect().top - document.querySelector('.code-view').getBoundingClientRect().top) < 2`);
   await browser("focus", ".code-view");
   await browser("press", "End");
   await wait(`${syncHeader("sync/a.ts")}?.classList.contains('reviewed')`);

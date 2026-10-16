@@ -1,25 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { useOutsidePointerDown } from "../lib/events";
+import { batch, createEffect, createSignal, For, on, Show } from "solid-js";
+import { autofocus, useOutsidePointerDown } from "../lib/events";
 import { commitAge } from "../lib/format";
 import type { Comparison, Info } from "../types";
 import { CommitPicker } from "./CommitPicker";
 
-export function ReviewPalette({
-  tab,
-  comparison,
-  mode,
-  from,
-  to,
-  commits,
-  isGit,
-  comparing,
-  onFiles,
-  onWorking,
-  onCommit,
-  onRangeDraft,
-  onRange,
-  openRequest,
-}: {
+export function ReviewPalette(props: {
   tab: string;
   comparison: Comparison;
   mode: string;
@@ -35,110 +20,193 @@ export function ReviewPalette({
   onRange: () => void;
   openRequest: number;
 }) {
-  const root = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
-  const [rangeOpen, setRangeOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const selectedCommit = commits.find((commit) => commit.id === comparison.target);
-  const current = tab === "files"
-    ? "File Browser"
-    : comparison.mode === "working"
-      ? "Uncommitted changes"
-      : comparison.mode === "commit"
-        ? selectedCommit?.subject || `Commit ${comparison.target.slice(0, 7)}`
-        : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
-  const search = query.trim().toLowerCase();
-  const matches = (value: string) => value.toLowerCase().includes(search);
-  const choices = commits.filter((commit) => matches(`${commit.id} ${commit.subject}`));
-  const scopes = [
+  let root!: HTMLDivElement;
+  let trigger!: HTMLButtonElement;
+  const [open, setOpen] = createSignal(false);
+  const [rangeOpen, setRangeOpen] = createSignal(false);
+  const [query, setQuery] = createSignal("");
+  const current = () => {
+    const { comparison } = props;
+    const selectedCommit = props.commits.find((commit) => commit.id === comparison.target);
+    return props.tab === "files"
+      ? "File Browser"
+      : comparison.mode === "working"
+        ? "Uncommitted changes"
+        : comparison.mode === "commit"
+          ? selectedCommit?.subject || `Commit ${comparison.target.slice(0, 7)}`
+          : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
+  };
+  const matches = (value: string) => value.toLowerCase().includes(query().trim().toLowerCase());
+  const choices = () => props.commits.filter((commit) => matches(`${commit.id} ${commit.subject}`));
+  const scopes = () => [
     {
       title: "File Browser",
       detail: "Browse the repository at HEAD",
       available: true,
-      selected: tab === "files",
-      run: () => choose(onFiles),
+      selected: props.tab === "files",
+      run: () => choose(props.onFiles),
     },
     {
       title: "Uncommitted changes",
       detail: "Review uncommitted changes",
-      available: isGit,
-      selected: tab === "changes" && comparison.mode === "working",
-      run: () => choose(onWorking),
+      available: props.isGit,
+      selected: props.tab === "changes" && props.comparison.mode === "working",
+      run: () => choose(props.onWorking),
     },
     {
       title: "Compare a range…",
       detail: "Choose base and target revisions",
-      available: commits.length > 0,
-      selected: tab === "changes" && comparison.mode === "range",
+      available: props.commits.length > 0,
+      selected: props.tab === "changes" && props.comparison.mode === "range",
       run: () => setRangeOpen(true),
     },
   ];
-  const visibleScopes = scopes.filter((scope) =>
+  const visibleScopes = () => scopes().filter((scope) =>
     scope.available && matches(`${scope.title.replace("…", "")} ${scope.detail}`));
-  const customRef = search &&
-    !commits.some((commit) => commit.id === query.trim() || commit.short === query.trim()) &&
-    !scopes.some((scope) => matches(scope.title)) ? query.trim() : "";
+  const customRef = () => {
+    const ref = query().trim();
+    return ref &&
+      !props.commits.some((commit) => commit.id === ref || commit.short === ref) &&
+      !scopes().some((scope) => matches(scope.title)) ? ref : "";
+  };
 
-  useOutsidePointerDown(root, open, () => setOpen(false));
-  useEffect(() => {
-    if (!openRequest) return;
+  useOutsidePointerDown(() => root, open, () => setOpen(false));
+  createEffect(on(() => props.openRequest, (request) => {
+    if (!request) return;
     setOpen(true);
     setRangeOpen(false);
     setQuery("");
-  }, [openRequest]);
+  }));
 
   function choose(action: () => void) {
     action();
     setOpen(false);
     setRangeOpen(false);
     setQuery("");
-    trigger.current?.focus();
+    trigger.focus();
   }
 
   return (
     <div
-      className="review-picker"
+      class="review-picker"
       ref={root}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
           setOpen(false);
           setRangeOpen(false);
-          trigger.current?.focus();
+          trigger.focus();
         }
       }}
     >
       <button
         type="button"
         ref={trigger}
-        className="review-trigger"
+        class="review-trigger"
         aria-label="Review scope"
-        aria-expanded={open}
+        aria-expanded={open()}
         aria-haspopup="dialog"
-        onClick={() => {
-          setOpen(!open);
-          setRangeOpen(mode === "range" && tab === "changes");
+        onClick={() => batch(() => {
+          setOpen(!open());
+          setRangeOpen(props.mode === "range" && props.tab === "changes");
           setQuery("");
-        }}
+        })}
       >
         <span>Review:</span>
-        <strong>{current}</strong>
+        <strong>{current()}</strong>
         <span aria-hidden="true">⌄</span>
       </button>
-      {open && (
-        <div className="review-popover" role="dialog" aria-label="Choose review scope">
-          {rangeOpen ? (
+      <Show when={open()}>
+        <div class="review-popover" role="dialog" aria-label="Choose review scope">
+          <Show
+            when={rangeOpen()}
+            fallback={
+              <>
+                <div class="review-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    ref={autofocus}
+                    aria-label="Search review scopes"
+                    placeholder="File, commit, branch, tag, or range…"
+                    value={query()}
+                    onInput={(event) => setQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      const scope = visibleScopes()[0];
+                      const commit = choices()[0];
+                      const ref = customRef();
+                      if (scope) scope.run();
+                      else if (commit) choose(() => props.onCommit(commit.id));
+                      else if (ref) choose(() => props.onCommit(ref));
+                    }}
+                  />
+                </div>
+                <div class="review-options" role="listbox" aria-label="Review scopes">
+                  <For each={visibleScopes()}>
+                    {(scope) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={scope.selected}
+                        onClick={scope.run}
+                      >
+                        <span class="option-check">{scope.selected ? "✓" : ""}</span>
+                        <span><strong>{scope.title}</strong><small>{scope.detail}</small></span>
+                      </button>
+                    )}
+                  </For>
+                  <Show when={choices().length || customRef()}><h2>Recent commits</h2></Show>
+                  <For each={choices()}>
+                    {(commit) => {
+                      const selected = () => props.tab === "changes" &&
+                        props.comparison.mode === "commit" &&
+                        props.comparison.target === commit.id;
+                      return (
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selected()}
+                          onClick={() => choose(() => props.onCommit(commit.id))}
+                        >
+                          <span class="option-check">{selected() ? "✓" : ""}</span>
+                          <span class="commit-subject">{commit.subject}</span>
+                          <code>{commit.short}</code>
+                          <time datetime={commit.date} title={commit.date.replace("T", " ")}>{commitAge(commit.date)}</time>
+                        </button>
+                      );
+                    }}
+                  </For>
+                  <Show when={customRef()}>
+                    {(ref) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        onClick={() => choose(() => props.onCommit(ref()))}
+                      >
+                        <span class="option-check" />
+                        <span><strong>Review commit {ref()}</strong><small>Use this Git ref</small></span>
+                      </button>
+                    )}
+                  </Show>
+                  <Show when={!visibleScopes().length && !choices().length && !customRef()}>
+                    <p>No matching review scope.</p>
+                  </Show>
+                </div>
+              </>
+            }
+          >
             <form
-              className="review-range"
+              class="review-range"
               onSubmit={(event) => {
                 event.preventDefault();
-                choose(onRange);
+                choose(props.onRange);
               }}
             >
               <button
                 type="button"
-                className="review-back"
+                class="review-back"
                 onClick={() => setRangeOpen(false)}
               >
                 ← Review scopes
@@ -147,88 +215,22 @@ export function ReviewPalette({
               <p>Choose base and target revisions.</p>
               <CommitPicker
                 label="Base"
-                commits={commits}
-                value={from}
-                onChange={(value) => onRangeDraft(value, to)}
+                commits={props.commits}
+                value={props.from}
+                onChange={(value) => props.onRangeDraft(value, props.to)}
               />
-              <span className="range-arrow" aria-hidden="true">↓</span>
+              <span class="range-arrow" aria-hidden="true">↓</span>
               <CommitPicker
                 label="Target"
-                commits={commits}
-                value={to}
-                onChange={(value) => onRangeDraft(from, value)}
+                commits={props.commits}
+                value={props.to}
+                onChange={(value) => props.onRangeDraft(props.from, value)}
               />
-              <button className="primary" disabled={comparing}>Compare</button>
+              <button class="primary" disabled={props.comparing}>Compare</button>
             </form>
-          ) : (
-            <>
-              <div className="review-search">
-                <span aria-hidden="true">⌕</span>
-                <input
-                  autoFocus
-                  aria-label="Search review scopes"
-                  placeholder="File, commit, branch, tag, or range…"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    event.preventDefault();
-                    if (visibleScopes[0]) visibleScopes[0].run();
-                    else if (choices[0]) choose(() => onCommit(choices[0].id));
-                    else if (customRef) choose(() => onCommit(customRef));
-                  }}
-                />
-              </div>
-              <div className="review-options" role="listbox" aria-label="Review scopes">
-                {visibleScopes.map((scope) => (
-                  <button
-                    type="button"
-                    role="option"
-                    key={scope.title}
-                    aria-selected={scope.selected}
-                    onClick={scope.run}
-                  >
-                    <span className="option-check">{scope.selected ? "✓" : ""}</span>
-                    <span><strong>{scope.title}</strong><small>{scope.detail}</small></span>
-                  </button>
-                ))}
-                {(!!choices.length || customRef) && <h2>Recent commits</h2>}
-                {choices.map((commit) => {
-                  const selected = tab === "changes" && comparison.mode === "commit" &&
-                    comparison.target === commit.id;
-                  return (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      key={commit.id}
-                      onClick={() => choose(() => onCommit(commit.id))}
-                    >
-                      <span className="option-check">{selected ? "✓" : ""}</span>
-                      <span className="commit-subject">{commit.subject}</span>
-                      <code>{commit.short}</code>
-                      <time dateTime={commit.date} title={commit.date.replace("T", " ")}>{commitAge(commit.date)}</time>
-                    </button>
-                  );
-                })}
-                {customRef && (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected="false"
-                    onClick={() => choose(() => onCommit(customRef))}
-                  >
-                    <span className="option-check" />
-                    <span><strong>Review commit {customRef}</strong><small>Use this Git ref</small></span>
-                  </button>
-                )}
-                {!visibleScopes.length && !choices.length && !customRef &&
-                  <p>No matching review scope.</p>}
-              </div>
-            </>
-          )}
+          </Show>
         </div>
-      )}
+      </Show>
     </div>
   );
 }

@@ -1,18 +1,23 @@
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
-import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  Match,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+  untrack,
+} from "solid-js";
 import {
   parseDiffFromFile,
   type CodeViewItem,
   type FileDiffMetadata,
   type SelectedLineRange,
 } from "@pierre/diffs";
+import { CodeView, type CodeViewInstance } from "../components/CodeView";
 import { FileFinder } from "../components/FileFinder";
 import { ReviewPalette } from "../components/ReviewPalette";
 import { CommandLauncher } from "../components/CommandLauncher";
@@ -48,227 +53,242 @@ declare const __RV_VERSION__: string;
 const HEADER_HEIGHT = 44;
 const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "];
 
-export function Review({
-  info,
-  state,
-  refreshInfo,
-}: {
+// Event handlers update several signals at once; batch them so effects (URL
+// history, loading) only see the final state.
+function batched<T extends unknown[], R>(fn: (...args: T) => R) {
+  return (...args: T) => batch(() => fn(...args));
+}
+
+export function Review(props: {
   info: Info;
   state: SavedState;
   refreshInfo: () => Promise<Info>;
 }) {
-  const [saved] = useState(() => ({ ...readPreferences(state.view), ...readLocation(info) }));
-  const [restoring, setRestoring] = useState(saved.mode !== "working");
-  const [reviewed, setReviewed] = useState(state.reviewed || {});
-  const [search, setSearch] = useState(saved.search);
-  const [comments, setComments] = useState(state.comments || []);
-  const [tab, setTab] = useState(saved.tab);
-  const [mode, setMode] = useState(saved.mode);
-  const [from, setFrom] = useState(saved.from);
-  const [to, setTo] = useState(saved.to);
-  const [comparison, setComparison] = useState<Comparison>(info.working);
-  const compareLabel = comparison.mode === "working"
-    ? "Uncommitted changes"
-    : comparison.mode === "commit"
-      ? `Commit ${comparison.target.slice(0, 7)}`
-      : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
-  const [comparing, setComparing] = useState(false);
-  const [error, setError] = useState("");
-  const [selected, setSelected] = useState(saved.selected);
-  const [viewerMode, setViewerMode] = useState(saved.viewerMode);
+  const info = () => props.info;
+  const { state, refreshInfo } = props;
+  const saved = { ...readPreferences(state.view), ...readLocation(untrack(info)) };
+  const [restoring, setRestoring] = createSignal(saved.mode !== "working");
+  const [reviewed, setReviewed] = createSignal(state.reviewed || {});
+  const [search, setSearch] = createSignal(saved.search);
+  const [comments, setComments] = createSignal(state.comments || []);
+  const [tab, setTab] = createSignal(saved.tab);
+  const [mode, setMode] = createSignal(saved.mode);
+  const [from, setFrom] = createSignal(saved.from);
+  const [to, setTo] = createSignal(saved.to);
+  const [comparison, setComparison] = createSignal<Comparison>(untrack(info).working);
+  const compareLabel = createMemo(() => {
+    const { mode, base, target } = comparison();
+    return mode === "working"
+      ? "Uncommitted changes"
+      : mode === "commit"
+        ? `Commit ${target.slice(0, 7)}`
+        : `${base.slice(0, 7)} → ${target.slice(0, 7)}`;
+  });
+  const [comparing, setComparing] = createSignal(false);
+  const [error, setError] = createSignal("");
+  const [selected, setSelected] = createSignal(saved.selected);
+  const [viewerMode, setViewerMode] = createSignal(saved.viewerMode);
   // Diffs show every changed file in one scroll; "selected" follows the file
   // at the top. Old/New and the File Browser show one file at a time.
-  const diffAll = tab === "changes" && viewerMode === "diff";
-  const contentKey = JSON.stringify([
-    tab, selected, ...(tab === "changes" ? [comparison.base, comparison.target] : []),
-  ]);
-  const [loaded, setLoaded] = useState<{ key: string; content: Content }>();
-  const [contentRevision, setContentRevision] = useState(0);
-  const allKey = JSON.stringify([comparison.base, comparison.target, contentRevision]);
+  const diffAll = createMemo(() => tab() === "changes" && viewerMode() === "diff");
+  const contentKey = createMemo(() => JSON.stringify([
+    tab(), selected(), ...(tab() === "changes" ? [comparison().base, comparison().target] : []),
+  ]));
+  const [loaded, setLoaded] = createSignal<{ key: string; content: Content }>();
+  const [contentRevision, setContentRevision] = createSignal(0);
+  const allKey = createMemo(() =>
+    JSON.stringify([comparison().base, comparison().target, contentRevision()]));
   const [allLoaded, setAllLoaded] =
-    useState<{ key: string; contents: Record<string, Content> }>();
-  const allContents = allLoaded?.key === allKey ? allLoaded.contents : undefined;
-  const parsedDiffs = useRef(new Map<string, FileDiffMetadata>());
-  const [loading, setLoading] = useState(false);
-  const [split, setSplit] = useState(saved.split);
-  const [wrap, setWrap] = useState(saved.wrap);
-  const [expanded, setExpanded] = useState(saved.expanded);
-  const [range, setRange] = useState<SelectedLineRange | null>(null);
+    createSignal<{ key: string; contents: Record<string, Content> }>();
+  const allContents = createMemo(() => {
+    const value = allLoaded();
+    return value?.key === allKey() ? value.contents : undefined;
+  });
+  const parsedDiffs = new Map<string, FileDiffMetadata>();
+  const [loading, setLoading] = createSignal(false);
+  const [split, setSplit] = createSignal(saved.split);
+  const [wrap, setWrap] = createSignal(saved.wrap);
+  const [expanded, setExpanded] = createSignal(saved.expanded);
+  const [range, setRange] = createSignal<SelectedLineRange | null>(null);
   // The file the line range belongs to; in the all-files diff it may differ
   // from the selected file.
-  const [rangePath, setRangePath] = useState("");
-  const [draft, setDraft] = useState("");
-  const [generalDraft, setGeneralDraft] = useState("");
-  const [editing, setEditing] = useState<string>();
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState("");
+  const [rangePath, setRangePath] = createSignal("");
+  const [draft, setDraft] = createSignal("");
+  const [generalDraft, setGeneralDraft] = createSignal("");
+  const [editing, setEditing] = createSignal<string>();
+  const [copied, setCopied] = createSignal(false);
+  const [copyError, setCopyError] = createSignal("");
   const [dialog, setDialog] =
-    useState<"commands" | "finder" | "line" | "prompt" | "copied" | null>(null);
+    createSignal<"commands" | "finder" | "line" | "prompt" | "copied" | null>(null);
   const closeDialog = () => setDialog(null);
-  const [reviewPickerRequest, setReviewPickerRequest] = useState(0);
-  const [showFiles, setShowFiles] = useState(saved.showFiles);
-  const [showComments, setShowComments] = useState(saved.showComments);
-  const [filesWidth, setFilesWidth] = useState(saved.filesWidth);
-  const [commentsWidth, setCommentsWidth] = useState(saved.commentsWidth);
-  const [collapsed, setCollapsed] = useState(saved.collapsed);
-  const [highlight, setHighlight] = useState<Comment | null>(null);
-  const [pendingComment, setPendingComment] = useState<Comment | null>(null);
-  const cancelComment = () => {
+  const [reviewPickerRequest, setReviewPickerRequest] = createSignal(0);
+  const [showFiles, setShowFiles] = createSignal(saved.showFiles);
+  const [showComments, setShowComments] = createSignal(saved.showComments);
+  const [filesWidth, setFilesWidth] = createSignal(saved.filesWidth);
+  const [commentsWidth, setCommentsWidth] = createSignal(saved.commentsWidth);
+  const [collapsed, setCollapsed] = createSignal(saved.collapsed);
+  const [highlight, setHighlight] = createSignal<Comment | null>(null);
+  const [pendingComment, setPendingComment] = createSignal<Comment | null>(null);
+  const cancelComment = batched(() => {
     setEditing(undefined);
     setRange(null);
     setDraft("");
-  };
-  const clearSelection = () => {
+  });
+  const clearSelection = batched(() => {
     setRange(null);
     setHighlight(null);
     setPendingComment(null);
-  };
-  const viewer = useRef<CodeViewHandle<Comment, undefined>>(null);
-  const viewerContainer = useRef<HTMLDivElement>(null);
-  const interactionVersion = useRef(0);
-  const viewerFocusRequest = useRef<number | null>(null);
-  const viewerScrollKey = JSON.stringify(["viewer", contentKey, viewerMode]);
-  const comparisonRequest = useRef(0);
-  const viewRefresh = useRef(0);
-  const latestCommitPending = useRef(false);
-  const reviewHistory = useRef<{
+  });
+  // The mounted viewer. A signal, so effects that use it run once it mounts.
+  const [viewer, setViewer] = createSignal<CodeViewInstance<Comment>>();
+  const viewerContainer = () => viewer()?.getContainerElement();
+  let interactionVersion = 0;
+  let viewerFocusRequest: number | null = null;
+  const viewerScrollKey = createMemo(() => JSON.stringify(["viewer", contentKey(), viewerMode()]));
+  let comparisonRequest = 0;
+  let viewRefresh = 0;
+  let latestCommitPending = false;
+  let reviewHistory: {
     scope: string;
     paths: string[];
     reviewed: boolean;
-  }[]>([]);
-  const treeOrder = useRef<[string[], string[]]>([[], []]);
-  useEffect(() => {
-    const trackInteraction = () => interactionVersion.current++;
+  }[] = [];
+  const treeOrder: [string[], string[]] = [[], []];
+  {
+    const trackInteraction = () => interactionVersion++;
     const trackTypingFocus = (event: FocusEvent) => {
       if (isTyping(event.target)) trackInteraction();
     };
     document.addEventListener("pointerdown", trackInteraction, true);
     document.addEventListener("keydown", trackInteraction, true);
     document.addEventListener("focusin", trackTypingFocus);
-    return () => {
+    onCleanup(() => {
       document.removeEventListener("pointerdown", trackInteraction, true);
       document.removeEventListener("keydown", trackInteraction, true);
       document.removeEventListener("focusin", trackTypingFocus);
-    };
-  }, []);
-  useEffect(() => {
+    });
+  }
+  onMount(() => {
     if (saved.mode !== "working")
       void compare(saved.mode, { to: saved.target, from: saved.base, restore: true }).finally(
         () => setRestoring(false),
       );
-  }, []);
+  });
   const href = (overrides: Partial<ViewLocation> = {}) => viewHref({
-    tab, comparison, path: selected, viewerMode, split, expanded, commits: info.commits,
+    tab: tab(), comparison: comparison(), path: selected(), viewerMode: viewerMode(),
+    split: split(), expanded: expanded(), commits: info().commits,
     ...overrides,
   });
   const fileHref = (path: string) => href({ path });
-  const initialURL = useRef(true);
-  const replaceURL = useRef(false);
-  useEffect(() => {
-    if (restoring || comparing || error) return;
+  let initialURL = true;
+  let replaceURL = false;
+  createEffect(() => {
+    if (restoring() || comparing() || error()) return;
     const next = href();
     // Scrolling through the all-files diff updates the URL without history.
-    if (initialURL.current || replaceURL.current) {
+    if (initialURL || replaceURL) {
       history.replaceState(null, "", next);
-      initialURL.current = false;
-      replaceURL.current = false;
+      initialURL = false;
+      replaceURL = false;
     } else if (next !== `${location.pathname}${location.search}${location.hash}`) {
       history.pushState(null, "", next);
     }
-  }, [restoring, comparing, error, tab, comparison, selected, viewerMode, split, expanded, info.commits]);
-  useEffect(() => {
+  });
+  {
     // Back/Forward use the same loading path as a direct link or new tab.
     const restoreURL = () => location.reload();
     window.addEventListener("popstate", restoreURL);
-    return () => window.removeEventListener("popstate", restoreURL);
-  }, []);
+    onCleanup(() => window.removeEventListener("popstate", restoreURL));
+  }
 
-  const storageError = useSavedState(state, {
-    view: { search, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
+  const storageError = useSavedState(state, () => ({
+    view: {
+      search: search(), wrap: wrap(), showFiles: showFiles(), showComments: showComments(),
+      filesWidth: filesWidth(), commentsWidth: commentsWidth(), collapsed: collapsed(),
+    },
     // Mutable views are only reviewed for this page snapshot.
     reviewed: Object.fromEntries(
-      Object.entries(reviewed).filter(([scope]) => scope !== "files" && scope !== "working"),
+      Object.entries(reviewed()).filter(([scope]) => scope !== "files" && scope !== "working"),
     ),
-    comments,
-  });
-  const paths = useMemo(
-    () =>
-      tab === "files"
-        ? info.files
-        : comparison.entries.map((entry) => entry.path),
-    [tab, info.files, comparison],
-  );
-  const entries = tab === "files" ? info.working.entries : comparison.entries;
+    comments: comments(),
+  }));
+  const paths = createMemo(() =>
+    tab() === "files"
+      ? info().files
+      : comparison().entries.map((entry) => entry.path));
+  const entries = () => tab() === "files" ? info().working.entries : comparison().entries;
   const isMessage = (path: string) =>
-    tab === "changes" && path === MESSAGE_PATH && comparison.mode === "commit";
+    tab() === "changes" && path === MESSAGE_PATH && comparison().mode === "commit";
   // The commit message shown on its own; the all-files diff includes it.
-  const messageView = !diffAll && isMessage(selected);
-  const messageKey = JSON.stringify([tab, MESSAGE_PATH, comparison.base, comparison.target]);
-  const messageContent = useMemo<Content | undefined>(
-    () => comparison.message === undefined
+  const messageView = createMemo(() => !diffAll() && isMessage(selected()));
+  const messageKey = createMemo(() =>
+    JSON.stringify([tab(), MESSAGE_PATH, comparison().base, comparison().target]));
+  const message = () => comparison().message;
+  const messageContent = createMemo(on([message, messageKey], ([text, key]): Content | undefined =>
+    text === undefined
       ? undefined
       : {
           oldFile: null,
           newFile: {
             name: "COMMIT_MESSAGE.txt",
-            contents: comparison.message,
-            cacheKey: messageKey,
+            contents: text,
+            cacheKey: key,
           },
-        },
-    [comparison.message, messageKey],
-  );
-  const content = diffAll
-    ? isMessage(selected) ? messageContent : allContents?.[selected]
+        }));
+  const content = createMemo(() => {
+    if (diffAll()) return isMessage(selected()) ? messageContent() : allContents()?.[selected()];
     // Never mount the previous file under the new selection while its effect loads.
-    : loaded?.key === contentKey ? loaded.content : undefined;
-  const reviewScope =
-    tab === "files"
+    const value = loaded();
+    return value?.key === contentKey() ? value.content : undefined;
+  });
+  const reviewScope = createMemo(() =>
+    tab() === "files"
       ? "files"
-      : comparison.mode === "working"
+      : comparison().mode === "working"
         ? "working"
-        : JSON.stringify([comparison.mode, comparison.base, comparison.target]);
-  const reviewedInView = reviewed[reviewScope];
-  const hasMessage = tab === "changes" && comparison.mode === "commit";
-  const selectedReviewed = reviewedInView?.includes(selected) || false;
-  const focusViewer = useCallback(() => {
-    viewerContainer.current?.focus({ preventScroll: true });
-  }, []);
-  const select = useCallback(
-    (path: string) => {
-      if (diffAll) {
-        setScrollRequest({ path });
-        if (path === selected) {
-          focusViewer();
-          return;
-        }
-        viewerFocusRequest.current = interactionVersion.current;
-        setSelected(path);
-        clearSelection();
-        return;
-      }
-      if (path === selected) {
+        : JSON.stringify([comparison().mode, comparison().base, comparison().target]));
+  const reviewedInView = createMemo(() => reviewed()[reviewScope()]);
+  const hasMessage = createMemo(() => tab() === "changes" && comparison().mode === "commit");
+  const selectedReviewed = () => reviewedInView()?.includes(selected()) || false;
+  const focusViewer = () => {
+    viewerContainer()?.focus({ preventScroll: true });
+  };
+  const select = batched((path: string) => {
+    if (diffAll()) {
+      setScrollRequest({ path });
+      if (path === selected()) {
         focusViewer();
         return;
       }
-      viewerFocusRequest.current = interactionVersion.current;
+      viewerFocusRequest = interactionVersion;
       setSelected(path);
       clearSelection();
-    },
-    [selected, focusViewer, diffAll],
-  );
+      return;
+    }
+    if (path === selected()) {
+      focusViewer();
+      return;
+    }
+    viewerFocusRequest = interactionVersion;
+    setSelected(path);
+    clearSelection();
+  });
 
-  useEffect(() => {
-    if (restoring || diffAll) return;
-    if (messageView && messageContent) {
-      setLoaded({
-        key: contentKey,
-        content: messageContent,
-      });
+  // Whether the selected file is listed, not the list: refreshing an
+  // unchanged list must not reload and remount the viewed file.
+  const selectedListed = createMemo(() => paths().includes(selected()));
+  createEffect(() => {
+    if (restoring() || diffAll()) return;
+    const key = contentKey();
+    const message = messageContent();
+    if (messageView() && message) {
+      setLoaded({ key, content: message });
       setLoading(false);
       setError("");
       return;
     }
-    if (!selected || !paths.includes(selected)) {
+    const path = selected();
+    if (!path || !selectedListed()) {
       setLoaded(undefined);
       setLoading(false);
       return;
@@ -276,19 +296,20 @@ export function Review({
     let active = true;
     setLoading(true);
     setError("");
+    const { base, target } = comparison();
     const load =
-      tab === "files"
-        ? loadFile(selected, "", contentRevision).then((newFile) => ({
+      tab() === "files"
+        ? loadFile(path, "", contentRevision()).then((newFile) => ({
             oldFile: null,
             newFile,
           }))
         : Promise.all([
-            loadFile(selected, comparison.base, contentRevision),
-            loadFile(selected, comparison.target, contentRevision),
+            loadFile(path, base, contentRevision()),
+            loadFile(path, target, contentRevision()),
           ]).then(([oldFile, newFile]) => ({ oldFile, newFile }));
     load
       .then((value) => {
-        if (active) setLoaded({ key: contentKey, content: value });
+        if (active) setLoaded({ key, content: value });
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -296,54 +317,59 @@ export function Review({
       .finally(() => {
         if (active) setLoading(false);
       });
-    return () => {
+    onCleanup(() => {
       active = false;
-    };
-  }, [selected, paths, tab, comparison, messageView, messageContent, restoring, contentKey, contentRevision, diffAll]);
+    });
+  });
 
-  useEffect(() => {
-    if (restoring || !diffAll || comparing || allContents) return;
+  createEffect(() => {
+    if (restoring() || !diffAll() || comparing() || allContents()) return;
     let active = true;
+    const key = allKey();
+    const { base, target } = comparison();
+    const revision = contentRevision();
     // Keeps a comparison error; comparing clears errors when it starts.
     setLoading(true);
-    Promise.all(paths.map((path) => Promise.all([
-      loadFile(path, comparison.base, contentRevision),
-      loadFile(path, comparison.target, contentRevision),
+    Promise.all(paths().map((path) => Promise.all([
+      loadFile(path, base, revision),
+      loadFile(path, target, revision),
     ]).then(([oldFile, newFile]) => [path, { oldFile, newFile }] as const)))
-      .then((contents) => {
+      .then(batched((contents) => {
         if (!active) return;
-        setAllLoaded({ key: allKey, contents: Object.fromEntries(contents) });
+        setAllLoaded({ key, contents: Object.fromEntries(contents) });
         setLoading(false);
-      })
-      .catch((e) => {
+      }))
+      .catch(batched((e) => {
         if (!active) return;
         setError(e.message);
         setLoading(false);
-      });
-    return () => {
+      }));
+    onCleanup(() => {
       active = false;
-    };
-  }, [paths, comparison, restoring, comparing, allKey, allContents, contentRevision, diffAll]);
+    });
+  });
 
   async function compare(nextMode: string, {
-    to: nextTo = to,
-    from: nextFrom = from,
+    to: nextTo = to(),
+    from: nextFrom = from(),
     restore = false,
     info: refreshedInfo,
-    refresh = restore ? 0 : ++viewRefresh.current,
+    refresh = restore ? 0 : ++viewRefresh,
   }: { to?: string; from?: string; restore?: boolean; info?: Info; refresh?: number } = {}) {
-    const id = ++comparisonRequest.current;
-    if (!restore) setContentRevision(refresh);
-    if (!restore) {
-      setMode(nextMode);
-      setSearch("");
-    }
-    setComparing(true);
-    setError("");
-    clearSelection();
+    const id = ++comparisonRequest;
+    batch(() => {
+      if (!restore) setContentRevision(refresh);
+      if (!restore) {
+        setMode(nextMode);
+        setSearch("");
+      }
+      setComparing(true);
+      setError("");
+      clearSelection();
+    });
     try {
-      const nextInfo = restore ? info : refreshedInfo || await refreshInfo();
-      if (id !== comparisonRequest.current) return;
+      const nextInfo = restore ? info() : refreshedInfo || await refreshInfo();
+      if (id !== comparisonRequest) return;
       const result =
         nextMode === "working"
           ? nextInfo.working
@@ -353,107 +379,115 @@ export function Review({
               to: nextTo,
               refresh: String(refresh),
             });
-      if (id !== comparisonRequest.current) return;
-      setComparison(result);
-      if (nextMode === "commit") setTo(result.target);
-      setSelected((current) => {
-        const kept = result.entries.some((entry) => entry.path === current);
-        if (restore && (tab === "files" || kept)) return current;
-        if (nextMode === "commit") return MESSAGE_PATH;
-        return kept ? current : result.entries[0]?.path || "";
+      if (id !== comparisonRequest) return;
+      batch(() => {
+        setComparison(result);
+        if (nextMode === "commit") setTo(result.target);
+        setSelected((current) => {
+          const kept = result.entries.some((entry) => entry.path === current);
+          if (restore && (tab() === "files" || kept)) return current;
+          if (nextMode === "commit") return MESSAGE_PATH;
+          return kept ? current : result.entries[0]?.path || "";
+        });
+        setComparing(false);
       });
     } catch (e) {
-      if (id === comparisonRequest.current) {
-        if (restore) setSelected("");
-        setError((e as Error).message);
+      if (id === comparisonRequest) {
+        batch(() => {
+          if (restore) setSelected("");
+          setError((e as Error).message);
+          setComparing(false);
+        });
       }
-    } finally {
-      if (id === comparisonRequest.current) setComparing(false);
     }
   }
 
-  const singleSide = tab === "changes" && !messageView && viewerMode !== "diff"
-    ? viewerMode === "old" ? "deletions" : "additions"
-    : undefined;
-  const fileSource = diffAll ? undefined
-    : singleSide === "deletions" ? content?.oldFile : content?.newFile;
+  const singleSide = createMemo(() => tab() === "changes" && !messageView() && viewerMode() !== "diff"
+    ? viewerMode() === "old" ? "deletions" as const : "additions" as const
+    : undefined);
+  const fileSource = createMemo(() => diffAll() ? undefined
+    : singleSide() === "deletions" ? content()?.oldFile : content()?.newFile);
 
-  function changeViewerMode(value: ViewerMode) {
+  const changeViewerMode = batched((value: ViewerMode) => {
     setViewerMode(value);
     clearSelection();
     closeDialog();
-  }
+  });
 
-  const onSelection = useCallback((value: SelectedLineRange | null, path?: string) => {
+  const onSelection = batched((value: SelectedLineRange | null, path?: string) => {
+    const side = singleSide();
     setHighlight(null);
     if (value) setShowComments(true);
     if (value && path) setRangePath(path);
     // A reference must use one file-side's coordinates, never mixed old/new numbers.
     setRange(
-      value && singleSide
-        ? { start: value.start, end: value.end, side: singleSide }
+      value && side
+        ? { start: value.start, end: value.end, side }
         : value?.endSide && value.endSide !== value.side
         ? { ...value, end: value.start, endSide: value.side }
         : value,
     );
-  }, [singleSide]);
-  const options = useMemo(
-    () => ({
-      theme: "light-plus" as const,
-      themeType: "light" as const,
-      diffStyle: split ? ("split" as const) : ("unified" as const),
-      enableLineSelection: true,
-      onLineSelected: (value: SelectedLineRange | null, context: { item: { id: string } }) =>
-        onSelection(value, context.item.id),
-      itemMetrics: { lineHeight: 23, diffHeaderHeight: HEADER_HEIGHT },
-      pointerEventsOnScroll: true,
-      overflow: wrap ? ("wrap" as const) : ("scroll" as const),
-      expandUnchanged: expanded,
-      disableFileHeader: !diffAll,
-      stickyHeaders: true,
-      ...(diffAll ? { layout: { paddingTop: 0, paddingBottom: 0, gap: 0 } } : {}),
-    }),
-    [split, wrap, expanded, onSelection, diffAll],
-  );
-  const prompt = formatPrompt(comments);
-  const notice = diffAll
-    ? content?.newFile?.notice || content?.oldFile?.notice
-    : fileSource?.notice;
-  const start = range ? Math.min(range.start, range.end) : 1;
-  const end = range ? Math.max(range.start, range.end) : 1;
+  });
+  const options = createMemo(() => ({
+    theme: "light-plus" as const,
+    themeType: "light" as const,
+    diffStyle: split() ? ("split" as const) : ("unified" as const),
+    enableLineSelection: true,
+    onLineSelected: (value: SelectedLineRange | null, context: { item: { id: string } }) =>
+      onSelection(value, context.item.id),
+    itemMetrics: { lineHeight: 23, diffHeaderHeight: HEADER_HEIGHT },
+    pointerEventsOnScroll: true,
+    overflow: wrap() ? ("wrap" as const) : ("scroll" as const),
+    expandUnchanged: expanded(),
+    disableFileHeader: !diffAll(),
+    stickyHeaders: true,
+    ...(diffAll() ? { layout: { paddingTop: 0, paddingBottom: 0, gap: 0 } } : {}),
+  }));
+  const prompt = createMemo(() => formatPrompt(comments()));
+  const notice = createMemo(() => diffAll()
+    ? content()?.newFile?.notice || content()?.oldFile?.notice
+    : fileSource()?.notice);
+  const start = () => {
+    const value = range();
+    return value ? Math.min(value.start, value.end) : 1;
+  };
+  const end = () => {
+    const value = range();
+    return value ? Math.max(value.start, value.end) : 1;
+  };
 
   function matchesScope(comment: Comment) {
     return (
       !comment.general &&
-      (tab === "files"
+      (tab() === "files"
         ? !comment.comparison
-        : comment.comparison?.base === comparison.base &&
-          comment.comparison.target === comparison.target)
+        : comment.comparison?.base === comparison().base &&
+          comment.comparison.target === comparison().target)
     );
   }
   function matchesView(comment: Comment) {
-    return (diffAll || comment.path === selected) && matchesScope(comment) &&
-      (!singleSide || (comment.side || "additions") === singleSide);
+    return (diffAll() || comment.path === selected()) && matchesScope(comment) &&
+      (!singleSide() || (comment.side || "additions") === singleSide());
   }
   function commentRange(comment: Comment): SelectedLineRange {
     return {
       start: comment.start,
       end: comment.end,
-      ...(diffAll && !isMessage(comment.path) ? { side: comment.side || "additions" } : {}),
+      ...(diffAll() && !isMessage(comment.path) ? { side: comment.side || "additions" } : {}),
     };
   }
   function parseDiff(key: string, { oldFile, newFile }: Content) {
-    let diff = parsedDiffs.current.get(key);
+    let diff = parsedDiffs.get(key);
     if (!diff) {
       diff = parseDiffFromFile(oldFile, newFile);
       // Include the comparison even for additions/deletions with a missing side.
       diff.cacheKey = key;
-      parsedDiffs.current.set(key, diff);
+      parsedDiffs.set(key, diff);
     }
     return diff;
   }
-  const diffKey = (path: string) => JSON.stringify([allKey, path]);
-  const annotationsFor = (path: string) => comments
+  const diffKey = (path: string) => JSON.stringify([allKey(), path]);
+  const annotationsFor = (path: string) => comments()
     .filter((comment) => comment.path === path && matchesView(comment))
     .map((comment) => ({
       lineNumber: comment.end,
@@ -461,104 +495,112 @@ export function Review({
       metadata: comment,
     }));
   // CodeView needs a new version when the same item gets new text or annotations.
-  const itemVersion = useRef(0);
-  const previousComments = useRef(comments);
-  const previousContent = useRef<unknown>(content);
-  const versionedContent = diffAll ? allContents : content;
-  if (
-    previousComments.current !== comments ||
-    previousContent.current !== versionedContent
-  ) {
-    previousComments.current = comments;
-    previousContent.current = versionedContent;
-    itemVersion.current++;
-  }
+  let versionCount = 0;
+  const versionedContent = createMemo<unknown>(() => diffAll() ? allContents() : content());
+  const itemVersion = createMemo(on([comments, versionedContent], () => ++versionCount));
   // Unreviewed files first, then reviewed ones, each in file tree order.
-  const order = useMemo(() => {
-    if (!diffAll) return [];
-    const done = (path: string) => reviewedInView?.includes(path) || false;
-    const all = [...(hasMessage ? [MESSAGE_PATH] : []), ...[...paths].sort(compareTreePaths)];
+  const order = createMemo(() => {
+    if (!diffAll()) return [];
+    const done = (path: string) => reviewedInView()?.includes(path) || false;
+    const all = [...(hasMessage() ? [MESSAGE_PATH] : []), ...[...paths()].sort(compareTreePaths)];
     return [...all.filter((path) => !done(path)), ...all.filter(done)];
-  }, [diffAll, hasMessage, paths, reviewedInView]);
+  });
   const noticeFor = (path: string) => {
-    const content = allContents?.[path];
+    const content = allContents()?.[path];
     if (!content || isMessage(path)) return undefined;
     if (!content.oldFile && !content.newFile)
       return "File no longer exists. Refresh to update the file list.";
     return content.newFile?.notice || content.oldFile?.notice ||
       (!content.oldFile?.contents && !content.newFile?.contents ? "Empty file" : undefined);
   };
-  const viewedSources = useMemo(() => [{ path: selected, file: fileSource }], [selected, fileSource]);
+  const viewedSources = createMemo(() => [{ path: selected(), file: fileSource() }]);
   // Find searches every file of the all-files diff, in display order.
-  const allSources = useMemo(() => allContents ? order.flatMap<TextSearchSource>((path) => isMessage(path)
-    ? [{ path, file: messageContent?.newFile }]
-    : noticeFor(path) ? [] : [{ path, diff: parseDiff(diffKey(path), allContents[path]) }])
-    : [], [allContents, order, messageContent]);
+  const allSources = createMemo(on([allContents, order, messageContent], ([contents, paths, message]) =>
+    contents ? paths.flatMap<TextSearchSource>((path) => isMessage(path)
+      ? [{ path, file: message?.newFile }]
+      : noticeFor(path) ? [] : [{ path, diff: parseDiff(diffKey(path), contents[path]) }])
+      : []));
   const find = useTextSearch({
-    sources: diffAll ? allSources : viewedSources, split, expanded, viewerMode, selected, viewer,
+    sources: () => diffAll() ? allSources() : viewedSources(),
+    split, expanded, viewerMode, selected, viewer,
     // Moving between files of the all-files diff keeps the search.
-    contentKey: diffAll ? allKey : contentKey,
+    contentKey: () => diffAll() ? allKey() : contentKey(),
   });
-  // Keep item objects stable across unrelated renders: CodeView resets its
-  // items when any item changes identity, and doing so while it renders (it
-  // flushes React updates mid-frame) drops a pending scrollTo, e.g. from J/K.
-  // Annotations follow comments through itemVersion.
-  const allItems = useMemo(() => diffAll && allContents ? order.map((path) => {
-    const shared = { id: path, annotations: annotationsFor(path), version: itemVersion.current };
-    if (isMessage(path)) return { ...shared, type: "file", file: messageContent?.newFile };
-    const notice = noticeFor(path);
-    // Files without a previewable diff show only their header.
-    return notice
-      ? { ...shared, type: "diff", collapsed: true,
-          fileDiff: parseDiff(diffKey(path), { oldFile: null, newFile: { name: path, contents: "" } }) }
-      : { ...shared, type: "diff", fileDiff: parseDiff(diffKey(path), allContents[path]) };
-  }) : [], [diffAll, allContents, order, messageContent, itemVersion.current]);
-  const fileItems = useMemo(() => !diffAll && content && !notice && fileSource
-    ? [{ type: "file", file: fileSource, id: selected, annotations: annotationsFor(selected), version: itemVersion.current }]
-    : [], [diffAll, content, notice, fileSource, selected, singleSide, itemVersion.current]);
-  const items = (diffAll ? allItems : fileItems) as CodeViewItem<Comment>[];
-  const highlightedRange =
-    highlight && matchesView(highlight) ? commentRange(highlight) : range;
-  const highlightedPath = highlight && matchesView(highlight) ? highlight.path : rangePath;
+  // Keep item objects stable across unrelated updates: CodeView resets its
+  // items when any item changes identity, which drops a pending scrollTo,
+  // e.g. from J/K. Annotations follow comments through itemVersion.
+  const allItems = createMemo(on(
+    [diffAll, allContents, order, messageContent, itemVersion],
+    ([all, contents, paths, message, version]) => all && contents ? paths.map((path) => {
+      const shared = { id: path, annotations: annotationsFor(path), version };
+      if (isMessage(path)) return { ...shared, type: "file", file: message?.newFile };
+      const notice = noticeFor(path);
+      // Files without a previewable diff show only their header.
+      return notice
+        ? { ...shared, type: "diff", collapsed: true,
+            fileDiff: parseDiff(diffKey(path), { oldFile: null, newFile: { name: path, contents: "" } }) }
+        : { ...shared, type: "diff", fileDiff: parseDiff(diffKey(path), contents[path]) };
+    }) : [],
+  ));
+  const fileItems = createMemo(on(
+    [diffAll, content, notice, fileSource, selected, singleSide, itemVersion],
+    ([all, content, notice, file, path, , version]) => !all && content && !notice && file
+      ? [{ type: "file", file, id: path, annotations: annotationsFor(path), version }]
+      : [],
+  ));
+  const items = () => (diffAll() ? allItems() : fileItems()) as CodeViewItem<Comment>[];
+  const highlightedRange = () => {
+    const comment = highlight();
+    return comment && matchesView(comment) ? commentRange(comment) : range();
+  };
+  const highlightedPath = () => {
+    const comment = highlight();
+    return comment && matchesView(comment) ? comment.path : rangePath();
+  };
   // Full-file rendering has one column; side metadata is only for the comment.
-  const viewerRange = highlightedRange && !diffAll
-    ? { start: highlightedRange.start, end: highlightedRange.end }
-    : highlightedRange;
+  const selectedLines = createMemo(() => {
+    const value = highlightedRange();
+    if (!value) return null;
+    return {
+      id: highlightedPath(),
+      range: diffAll() ? value : { start: value.start, end: value.end },
+    };
+  });
 
-  useEffect(() => {
+  createEffect(on([content, loading, comparing, restoring, () => items().length, viewer], () => {
     if (
-      viewerFocusRequest.current !== null && content && !loading && !comparing &&
-      !restoring && items.length
+      viewerFocusRequest !== null && content() && !loading() && !comparing() &&
+      !restoring() && items().length && viewer()
     ) {
-      const request = viewerFocusRequest.current;
-      viewerFocusRequest.current = null;
-      if (request === interactionVersion.current) focusViewer();
+      const request = viewerFocusRequest;
+      viewerFocusRequest = null;
+      if (request === interactionVersion) focusViewer();
     }
-  }, [content, loading, comparing, restoring, items.length, focusViewer]);
+  }));
 
   const skipScrollRestore = useViewerScroll({
-    root: info.root,
+    root: untrack(info).root,
     scrollKey: viewerScrollKey,
     content,
     container: viewerContainer,
-    interactionVersion,
+    interactionVersion: () => interactionVersion,
     disabled: diffAll,
   });
 
   // The all-files diff remembers each file's scroll offset relative to the
   // file, under the key its own diff used before diffs were combined.
   const fileScrollKey = (path: string) => JSON.stringify([
-    "viewer", JSON.stringify([tab, path, comparison.base, comparison.target]), "diff",
+    "viewer", JSON.stringify([tab(), path, comparison().base, comparison().target]), "diff",
   ]);
   // Selection follows the file at the top only while the user scrolls the
   // diff: not after navigating to a file, which may be too short to reach the
   // top, and not when panels or wrapping change the layout.
-  const scrollIntent = useRef(false);
-  useEffect(() => {
+  let scrollIntent = false;
+  {
     // Whether the latest interaction scrolls the diff.
     const track = (event: Event) => {
-      const element = viewerContainer.current;
-      scrollIntent.current = !!element && event.composedPath().includes(element) && (
+      const element = viewerContainer();
+      scrollIntent = !!element && event.composedPath().includes(element) && (
         event.type === "wheel" || event.type === "touchstart" ||
         event instanceof KeyboardEvent && SCROLL_KEYS.includes(event.key) ||
         // Dragging the scrollbar.
@@ -569,205 +611,216 @@ export function Review({
     const types = ["wheel", "touchstart", "pointerdown", "keydown"];
     for (const type of types)
       document.addEventListener(type, track, { capture: true, passive: true });
-    return () => {
+    onCleanup(() => {
       for (const type of types) document.removeEventListener(type, track, true);
-    };
-  }, []);
-  // Set once the mounted all-files diff has scrolled to its initial file.
-  const restoredKey = useRef("");
-  const lastScrollTop = useRef(0);
-  const live = useRef({ order, selected, findOpen: false });
-  live.current = { order, selected, findOpen: find.open };
-  // The viewed file follows the current match of a search across files.
-  const findMatch = find.open ? find.matches[find.active] : undefined;
-  useEffect(() => {
-    if (!diffAll || !findMatch || findMatch.path === selected) return;
-    replaceURL.current = true;
-    setSelected(findMatch.path);
-  }, [findMatch]);
-  function scrollToFile(path: string, offset = 0) {
-    if (!viewer.current || !order.includes(path)) return;
-    scrollIntent.current = false;
-    viewer.current.scrollTo({ type: "item", id: path, align: "start", offset: -offset });
+    });
   }
-  const onViewerScroll = useCallback((
-    scrollTop: number,
-    instance: NonNullable<ReturnType<CodeViewHandle<Comment, undefined>["getInstance"]>>,
-  ) => {
-    if (restoredKey.current !== allKey) return;
+  // Set once the mounted all-files diff has scrolled to its initial file.
+  let restoredKey = "";
+  let lastScrollTop = 0;
+  // The viewed file follows the current match of a search across files.
+  const findMatch = createMemo(() => find.open() ? find.matches()[find.active()] : undefined);
+  createEffect(on(findMatch, (match) => {
+    if (!diffAll() || !match || match.path === selected()) return;
+    replaceURL = true;
+    setSelected(match.path);
+  }));
+  function scrollToFile(path: string, offset = 0) {
+    const instance = viewer();
+    if (!instance || !order().includes(path)) return;
+    scrollIntent = false;
+    instance.scrollTo({ type: "item", id: path, align: "start", offset: -offset });
+  }
+  const onViewerScroll = (scrollTop: number, instance: CodeViewInstance<Comment>) => {
+    if (restoredKey !== allKey()) return;
     let current = "";
-    for (const path of live.current.order) {
+    for (const path of order()) {
       const top = instance.getTopForItem(path);
       if (top === undefined || top > scrollTop + 1) break;
       current = path;
     }
     if (!current) return;
-    rememberPosition(info.root, fileScrollKey(current), {
+    rememberPosition(info().root, fileScrollKey(current), {
       top: scrollTop - (instance.getTopForItem(current) || 0),
       left: 0,
     });
     // Only scrolling moves the selection, not layout changes like Expand all.
-    const scrolled = scrollTop !== lastScrollTop.current;
-    lastScrollTop.current = scrollTop;
+    const scrolled = scrollTop !== lastScrollTop;
+    lastScrollTop = scrollTop;
     if (
-      !scrolled || !scrollIntent.current ||
-      live.current.findOpen || current === live.current.selected
+      !scrolled || !scrollIntent ||
+      find.open() || current === selected()
     ) return;
     // The last files may be too short to reach the top: at the bottom, keep a
     // selected file that is still visible below the top one.
-    const element = viewerContainer.current;
-    const selectedTop = instance.getTopForItem(live.current.selected);
+    const element = viewerContainer();
+    const selectedTop = instance.getTopForItem(selected());
     if (
       element && selectedTop !== undefined &&
       element.scrollTop + element.clientHeight >= element.scrollHeight - 2 &&
       selectedTop > scrollTop && selectedTop < scrollTop + element.clientHeight
     ) return;
-    replaceURL.current = true;
+    replaceURL = true;
     setSelected(current);
-  }, [allKey, info.root, tab, comparison]);
-  const [scrollRequest, setScrollRequest] = useState<{ path: string }>();
-  useEffect(() => {
-    if (!diffAll || !allContents || loading || comparing || !viewer.current) return;
-    if (restoredKey.current !== allKey) {
-      restoredKey.current = allKey;
-      scrollIntent.current = false;
+  };
+  const [scrollRequest, setScrollRequest] = createSignal<{ path: string }>();
+  createEffect(on([scrollRequest, diffAll, allContents, loading, comparing, viewer], () => {
+    if (!diffAll() || !allContents() || loading() || comparing() || !viewer()) return;
+    if (restoredKey !== allKey()) {
+      restoredKey = allKey();
+      scrollIntent = false;
       // A pending comment scrolls to its own lines.
-      const path = order.includes(selected) ? selected : order[0];
-      if (path && path !== selected) {
-        replaceURL.current = true;
+      const path = order().includes(selected()) ? selected() : order()[0];
+      if (path && path !== selected()) {
+        replaceURL = true;
         setSelected(path);
       }
-      if (!pendingComment && path)
-        scrollToFile(path, scrollStore(info.root)[fileScrollKey(path)]?.top);
-    } else if (scrollRequest) {
-      scrollToFile(scrollRequest.path);
+      if (!pendingComment() && path)
+        scrollToFile(path, scrollStore(info().root)[fileScrollKey(path)]?.top);
+    } else if (scrollRequest()) {
+      scrollToFile(scrollRequest()!.path);
     }
     setScrollRequest(undefined);
-  }, [scrollRequest, diffAll, allContents, loading, comparing]);
+  }));
 
-  useEffect(() => {
-    if (!pendingComment || loading || comparing || !content || !viewer.current)
-      return;
-    skipScrollRestore();
-    scrollIntent.current = false;
-    viewer.current.scrollTo({
-      type: "range",
-      id: pendingComment.path,
-      range: commentRange(pendingComment),
-      align: "center",
-    });
-    setPendingComment(null);
-  }, [pendingComment, content, loading, comparing, viewerMode, viewerScrollKey]);
+  createEffect(on(
+    [pendingComment, content, loading, comparing, viewerMode, viewerScrollKey, viewer],
+    ([comment]) => {
+      const instance = viewer();
+      if (!comment || loading() || comparing() || !content() || !instance)
+        return;
+      skipScrollRestore();
+      scrollIntent = false;
+      instance.scrollTo({
+        type: "range",
+        id: comment.path,
+        range: commentRange(comment),
+        align: "center",
+      });
+      setPendingComment(null);
+    },
+  ));
 
   async function openComment(comment: Comment) {
-    const id = ++comparisonRequest.current;
-    setComparing(false);
-    setRange(null);
-    setHighlight(comment);
-    setError("");
-    if (viewerMode !== "diff" && comment.comparison && !comment.commit)
-      setViewerMode(comment.side === "deletions" ? "old" : "new");
-    if (matchesView(comment)) {
-      setSelected(comment.path);
-      setPendingComment(comment);
-      return;
-    }
-    if (matchesScope(comment)) {
-      setSelected(comment.path);
-      setPendingComment(comment);
-      return;
-    }
-    const refresh = ++viewRefresh.current;
-    setContentRevision(refresh);
-    setLoaded(undefined);
-    setSearch("");
+    const id = ++comparisonRequest;
+    const opened = batch(() => {
+      setComparing(false);
+      setRange(null);
+      setHighlight(comment);
+      setError("");
+      if (viewerMode() !== "diff" && comment.comparison && !comment.commit)
+        setViewerMode(comment.side === "deletions" ? "old" : "new");
+      if (matchesView(comment) || matchesScope(comment)) {
+        setSelected(comment.path);
+        setPendingComment(comment);
+        return true;
+      }
+      return false;
+    });
+    if (opened) return;
+    const refresh = ++viewRefresh;
+    batch(() => {
+      setContentRevision(refresh);
+      setLoaded(undefined);
+      setSearch("");
+    });
     let nextInfo: Info;
     try {
       nextInfo = await refreshInfo();
-      if (id !== comparisonRequest.current) return;
+      if (id !== comparisonRequest) return;
     } catch (e) {
-      if (id === comparisonRequest.current) setError((e as Error).message);
+      if (id === comparisonRequest) setError((e as Error).message);
       return;
     }
     if (!comment.comparison) {
-      setTab("files");
-      setComparing(false);
-    } else {
-      try {
-        const { mode: nextMode, base, target } = comment.comparison;
-        const result = nextMode === "working"
-          ? nextInfo.working
-          : await api<Comparison>("compare", {
-              mode: nextMode,
-              from: base,
-              to: target,
-              refresh: String(refresh),
-            });
-        if (id !== comparisonRequest.current) return;
+      batch(() => {
+        setTab("files");
+        setComparing(false);
+        setSelected(comment.path);
+        setPendingComment(comment);
+      });
+      return;
+    }
+    try {
+      const { mode: nextMode, base, target } = comment.comparison;
+      const result = nextMode === "working"
+        ? nextInfo.working
+        : await api<Comparison>("compare", {
+            mode: nextMode,
+            from: base,
+            to: target,
+            refresh: String(refresh),
+          });
+      if (id !== comparisonRequest) return;
+      batch(() => {
         setComparison(result);
         setMode(nextMode);
         setFrom(result.base);
         setTo(result.target || nextInfo.commits[0]?.id || "");
         setTab("changes");
         setComparing(false);
-      } catch (e) {
-        setError((e as Error).message);
-        return;
-      }
+        setSelected(comment.path);
+        setPendingComment(comment);
+      });
+    } catch (e) {
+      setError((e as Error).message);
     }
-    setSelected(comment.path);
-    setPendingComment(comment);
   }
 
-  function saveComment() {
-    if (!draft.trim()) return;
-    if (editing) {
+  const saveComment = batched(() => {
+    if (!draft().trim()) return;
+    const id = editing();
+    if (id) {
       setComments((items) =>
         items.map((item) =>
-          item.id === editing ? { ...item, text: draft.trim() } : item,
+          item.id === id ? { ...item, text: draft().trim() } : item,
         ),
       );
     } else {
-      if (!range || !rangePath) return;
+      const value = range();
+      const path = rangePath();
+      if (!value || !path) return;
       const comment: Comment = {
         id: crypto.randomUUID(),
-        path: rangePath,
-        start,
-        end,
-        text: draft.trim(),
-        side: range.side,
-        context: tab === "files" ? "File" : compareLabel,
-        ...(tab === "changes" ? {
-          comparison: { mode: comparison.mode, base: comparison.base, target: comparison.target },
+        path,
+        start: start(),
+        end: end(),
+        text: draft().trim(),
+        side: value.side,
+        context: tab() === "files" ? "File" : compareLabel(),
+        ...(tab() === "changes" ? {
+          comparison: {
+            mode: comparison().mode, base: comparison().base, target: comparison().target,
+          },
         } : {}),
-        ...(isMessage(rangePath) ? { commit: comparison.target } : {}),
+        ...(isMessage(path) ? { commit: comparison().target } : {}),
       };
       setComments((items) => [...items, comment]);
     }
     cancelComment();
     setCopied(false);
-  }
+  });
 
-  function saveGeneralComment() {
-    if (!generalDraft.trim()) return;
+  const saveGeneralComment = batched(() => {
+    if (!generalDraft().trim()) return;
     setComments((items) => [...items, {
       id: crypto.randomUUID(),
       path: "",
       start: 0,
       end: 0,
-      text: generalDraft.trim(),
+      text: generalDraft().trim(),
       general: true,
       context: "General",
     }]);
     setGeneralDraft("");
     setCopied(false);
-  }
+  });
 
   async function copyPrompt() {
     setCopyError("");
     // Never open a dialog on failure.
     try {
-      await copyText(prompt);
+      await copyText(prompt());
       setCopied(true);
       setDialog("copied");
     } catch {
@@ -778,16 +831,16 @@ export function Review({
     }
   }
 
-  const copyLabel = copied ? "✓ Copied" : "Copy Prompt";
+  const copyLabel = () => copied() ? "✓ Copied" : "Copy Prompt";
 
-  function changeTab(value: "files" | "changes", refresh = true) {
+  const changeTab = batched((value: "files" | "changes", refresh = true) => {
     if (refresh) {
-      comparisonRequest.current++;
+      comparisonRequest++;
       if (value === "files") setComparing(false);
-      const request = ++viewRefresh.current;
+      const request = ++viewRefresh;
       setContentRevision(request);
       void refreshInfo().catch((error) => {
-        if (request === viewRefresh.current)
+        if (request === viewRefresh)
           setError((error as Error).message);
       });
     }
@@ -796,24 +849,24 @@ export function Review({
     clearSelection();
     if (
       value === "changes" &&
-      !comparison.entries.some((entry) => entry.path === selected)
+      !comparison().entries.some((entry) => entry.path === selected())
     )
       setSelected(
-        comparison.mode === "commit"
+        comparison().mode === "commit"
           ? MESSAGE_PATH
-          : comparison.entries[0]?.path || "",
+          : comparison().entries[0]?.path || "",
       );
-  }
+  });
 
-  function resetReview() {
+  const resetReview = batched(() => {
     setComments([]);
     setReviewed({});
-    reviewHistory.current = [];
+    reviewHistory = [];
     cancelComment();
     setGeneralDraft("");
     clearSelection();
     setCopied(false);
-  }
+  });
 
   function clearReview() {
     if (!window.confirm(
@@ -822,57 +875,59 @@ export function Review({
     resetReview();
   }
 
-  function clearCopiedReview() {
+  const clearCopiedReview = batched(() => {
     closeDialog();
     resetReview();
-  }
+  });
 
-  function togglePathReviewed(path: string, advance = false) {
-    if (!path || !(path === MESSAGE_PATH || paths.includes(path)) || loading || comparing)
+  const togglePathReviewed = batched((path: string, advance = false) => {
+    if (!path || !(path === MESSAGE_PATH || paths().includes(path)) || loading() || comparing())
       return;
-    const wasReviewed = reviewedInView?.includes(path) || false;
-    reviewHistory.current.push({
-      scope: reviewScope,
+    const scope = reviewScope();
+    const wasReviewed = reviewedInView()?.includes(path) || false;
+    reviewHistory.push({
+      scope,
       paths: [path],
       reviewed: wasReviewed,
     });
     if (advance && !wasReviewed) moveFile(1);
     // Follow a file moving back to the unreviewed section.
-    else if (diffAll && wasReviewed && path === selected) setScrollRequest({ path });
+    else if (diffAll() && wasReviewed && path === selected()) setScrollRequest({ path });
     setReviewed((current) => ({
       ...current,
-      [reviewScope]: wasReviewed
-        ? (current[reviewScope] || []).filter((item) => item !== path)
-        : [...(current[reviewScope] || []), path],
+      [scope]: wasReviewed
+        ? (current[scope] || []).filter((item) => item !== path)
+        : [...(current[scope] || []), path],
     }));
-  }
+  });
 
-  function toggleDirectoryReviewed(directory: string) {
-    if (loading || comparing) return;
-    const files = paths.filter((path) => path.startsWith(directory));
+  const toggleDirectoryReviewed = batched((directory: string) => {
+    if (loading() || comparing()) return;
+    const files = paths().filter((path) => path.startsWith(directory));
     if (!files.length) return;
-    const wasReviewed = files.every((path) => reviewedInView?.includes(path));
-    reviewHistory.current.push({
-      scope: reviewScope,
+    const scope = reviewScope();
+    const wasReviewed = files.every((path) => reviewedInView()?.includes(path));
+    reviewHistory.push({
+      scope,
       paths: files,
       reviewed: wasReviewed,
     });
     setReviewed((current) => ({
       ...current,
-      [reviewScope]: wasReviewed
-        ? (current[reviewScope] || []).filter(
+      [scope]: wasReviewed
+        ? (current[scope] || []).filter(
             (item) => !files.includes(item),
           )
-        : [...new Set([...(current[reviewScope] || []), ...files])],
+        : [...new Set([...(current[scope] || []), ...files])],
     }));
-  }
+  });
 
   function toggleReviewed() {
-    togglePathReviewed(selected, true);
+    togglePathReviewed(selected(), true);
   }
 
-  function undo() {
-    const action = reviewHistory.current.pop();
+  const undo = batched(() => {
+    const action = reviewHistory.pop();
     if (!action) return;
     setReviewed((current) => {
       const reviewed = current[action.scope] || [];
@@ -883,41 +938,43 @@ export function Review({
           : reviewed.filter((path) => !action.paths.includes(path)),
       };
     });
-    if (action.scope === reviewScope) {
+    if (action.scope === reviewScope()) {
       const restored = action.paths.find(
-        (path) => path === MESSAGE_PATH || paths.includes(path),
+        (path) => path === MESSAGE_PATH || paths().includes(path),
       );
       if (restored) select(restored);
     }
-  }
+  });
 
   function moveFile(offset: number) {
-    const reviewItems = treeOrder.current.flat();
+    const reviewItems = treeOrder.flat();
     if (!reviewItems.length) return;
-    const current = reviewItems.indexOf(selected);
+    const current = reviewItems.indexOf(selected());
     const next = current < 0
       ? (offset > 0 ? 0 : reviewItems.length - 1)
       : (current + offset + reviewItems.length) % reviewItems.length;
     select(reviewItems[next]);
   }
 
-  function pickLines(start: number, end: number, side: "additions" | "deletions") {
+  const pickLines = batched((start: number, end: number, side: "additions" | "deletions") => {
+    const path = selected();
     const nextRange: SelectedLineRange = {
       start,
       end,
-      ...(tab === "changes" && !isMessage(selected) ? { side } : {}),
+      ...(tab() === "changes" && !isMessage(path) ? { side } : {}),
     };
+    const scrollRange = diffAll() && !isMessage(path) ? nextRange : { start, end };
     closeDialog();
-    onSelection(nextRange, selected);
-    requestAnimationFrame(() => viewer.current?.scrollTo({
+    onSelection(nextRange, path);
+    requestAnimationFrame(() => viewer()?.scrollTo({
       type: "range",
-      id: selected,
-      range: diffAll && !isMessage(selected) ? nextRange : { start, end },
+      id: path,
+      range: scrollRange,
       align: "center",
     }));
-  }
+  });
 
-  function runCommand(command: Command) {
+  const runCommand = batched((command: Command) => {
     if (command === "palette") setDialog("commands");
     else if (command === "find-viewed-file") find.show();
     else if (command === "next-text-match") find.findNext(1);
@@ -932,105 +989,102 @@ export function Review({
     else if (command === "previous-file") moveFile(-1);
     else if (command === "review-palette") setReviewPickerRequest((value) => value + 1);
     else if (command === "file-browser") {
-      viewerFocusRequest.current = interactionVersion.current;
+      viewerFocusRequest = interactionVersion;
       changeTab("files");
     } else if (command === "uncommitted") {
       changeTab("changes", false);
       void compare("working");
     } else if (command === "recent-commit") {
-      if (latestCommitPending.current) return;
-      latestCommitPending.current = true;
-      const refresh = ++viewRefresh.current;
+      if (latestCommitPending) return;
+      latestCommitPending = true;
+      const refresh = ++viewRefresh;
       setContentRevision(refresh);
       void refreshInfo()
         .then(async (nextInfo) => {
-          if (refresh !== viewRefresh.current) return;
+          if (refresh !== viewRefresh) return;
           const latest = nextInfo.commits[0]?.id;
           if (!latest) return;
-          setTo(latest);
-          changeTab("changes", false);
-          await compare("commit", { to: latest, info: nextInfo, refresh });
+          const comparing = batch(() => {
+            setTo(latest);
+            changeTab("changes", false);
+            return compare("commit", { to: latest, info: nextInfo, refresh });
+          });
+          await comparing;
         })
         .catch((error) => setError((error as Error).message))
         .finally(() => {
-          latestCommitPending.current = false;
+          latestCommitPending = false;
         });
-    } else if (command === "comment" && content && !notice && (diffAll || fileSource)) {
+    } else if (command === "comment" && content() && !notice() && (diffAll() || fileSource())) {
       setDialog("line");
     } else if (command === "toggle-reviewed") toggleReviewed();
     else if (command === "undo") undo();
     else if (command === "save-comment") saveComment();
-    else if (command === "copy-prompt" && comments.length) void copyPrompt();
-    else if (command === "preview-prompt" && comments.length) setDialog("prompt");
-    else if (command === "toggle-diff" && diffAll) setSplit((value) => !value);
+    else if (command === "copy-prompt" && comments().length) void copyPrompt();
+    else if (command === "preview-prompt" && comments().length) setDialog("prompt");
+    else if (command === "toggle-diff" && diffAll()) setSplit((value) => !value);
     else if (command === "toggle-wrap") setWrap((value) => !value);
     else if (command === "toggle-files") setShowFiles((value) => !value);
     else if (command === "toggle-comments") setShowComments((value) => !value);
-    else if (command === "expand-diff" && diffAll) setExpanded(true);
-    else if (command === "collapse-diff" && diffAll) setExpanded(false);
+    else if (command === "expand-diff" && diffAll()) setExpanded(true);
+    else if (command === "collapse-diff" && diffAll()) setExpanded(false);
     else if (command === "refresh") location.reload();
     else if (command === "cancel") cancelComment();
-  }
+  });
 
   useKeyboard({
     run: runCommand,
-    escape: () => {
-      if (find.open) {
+    escape: batched(() => {
+      if (find.open()) {
         find.close();
         focusViewer();
-      } else if (dialog) closeDialog();
-      else if (editing || range) cancelComment();
+      } else if (dialog()) closeDialog();
+      else if (editing() || range()) cancelComment();
       else return false;
       return true;
-    },
-    dialogOpen: !!dialog,
+    }),
+    dialogOpen: () => !!dialog(),
   });
 
-  const unreviewedCount = order.filter((path) => !reviewedInView?.includes(path)).length;
-  const summary = `${paths.length} ${paths.length === 1 ? "file" : "files"} · ${unreviewedCount} unreviewed`;
-  const codeView = (
-    <CodeView
-      ref={viewer}
-      containerRef={(element) => {
-        viewerContainer.current = element;
+  const summary = () => {
+    const count = paths().length;
+    const unreviewed = order().filter((path) => !reviewedInView()?.includes(path)).length;
+    return `${count} ${count === 1 ? "file" : "files"} · ${unreviewed} unreviewed`;
+  };
+  const codeView = () => (
+    <CodeView<Comment>
+      ref={(instance) => {
         // A remounted all-files diff scrolls to its file again.
-        if (!element) {
-          restoredKey.current = "";
-          return;
-        }
-        element.tabIndex = 0;
+        if (!instance) restoredKey = "";
+        setViewer(instance);
       }}
-      className="code-view"
-      items={items}
-      options={options}
-      selectedLines={
-        viewerRange
-          ? { id: highlightedPath, range: viewerRange }
-          : null
-      }
+      class="code-view"
+      items={items()}
+      options={options()}
+      selectedLines={selectedLines()}
       onSelectedLinesChange={(selection) =>
         onSelection(selection?.range || null, selection?.id)
       }
-      onScroll={diffAll ? onViewerScroll : undefined}
-      renderCustomHeader={diffAll ? (item) => (
+      onScroll={diffAll() ? onViewerScroll : undefined}
+      renderCustomHeader={diffAll() ? (item) => (
         <DiffFileHeader
           path={item.id}
-          title={isMessage(item.id) ? `Commit message · ${comparison.target.slice(0, 7)}` : ""}
+          title={isMessage(item.id) ? `Commit message · ${comparison().target.slice(0, 7)}` : ""}
           href={fileHref(item.id)}
-          stats={entries.find((entry) => entry.path === item.id)}
+          stats={entries().find((entry) => entry.path === item.id)}
           notice={noticeFor(item.id)}
-          current={item.id === selected}
-          reviewed={reviewedInView?.includes(item.id) || false}
-          reviewDisabled={loading || comparing}
+          current={item.id === selected()}
+          reviewed={reviewedInView()?.includes(item.id) || false}
+          reviewDisabled={loading() || comparing()}
           onSelect={() => select(item.id)}
-          onToggleReviewed={() => togglePathReviewed(item.id, item.id === selected)}
+          onToggleReviewed={() => togglePathReviewed(item.id, item.id === selected())}
         />
       ) : undefined}
       renderAnnotation={({ metadata: comment }) => (
         <button
-          className="comment-marker"
+          class="comment-marker"
           aria-label={`Open comment on ${reference(comment)}`}
-          onClick={() => {
+          onClick={batched(() => {
             setShowComments(true);
             setHighlight(comment);
             requestAnimationFrame(() => {
@@ -1040,65 +1094,71 @@ export function Review({
               card?.scrollIntoView({ block: "nearest" });
               card?.focus({ preventScroll: true });
             });
-          }}
+          })}
         >
           ▤ &nbsp; {reference(comment)} · {comment.text}
         </button>
       )}
     />
   );
+  // Remounts the viewer with its view, as each view restores its own scroll.
+  const paneKey = createMemo(() => diffAll()
+    ? `${tab()}:${comparison().base}:${comparison().target}:${viewerMode()}`
+    : `${tab()}:${selected()}:${comparison().base}:${comparison().target}:${viewerMode()}`);
 
   return (
-    <div className="app">
-      <header className="topbar">
+    <div class="app">
+      <header class="topbar">
         <span
-          className="repo-name"
-          title={info.root}
-          style={{ "--repo-hue": nameHue(info.name) } as CSSProperties}
+          class="repo-name"
+          title={info().root}
+          style={{ "--repo-hue": String(nameHue(info().name)) }}
         >
-          {info.name}
+          {info().name}
         </span>
-        {info.branch && <span className="branch">⑂ {info.branch}</span>}
+        <Show when={info().branch}>
+          <span class="branch">⑂ {info().branch}</span>
+        </Show>
         <ReviewPalette
-          tab={tab}
-          comparison={comparison}
-          mode={mode}
-          from={from}
-          to={to}
-          commits={info.commits}
-          isGit={info.isGit}
-          comparing={comparing}
+          tab={tab()}
+          comparison={comparison()}
+          mode={mode()}
+          from={from()}
+          to={to()}
+          commits={info().commits}
+          isGit={info().isGit}
+          comparing={comparing()}
           onFiles={() => changeTab("files")}
-          onWorking={() => {
+          onWorking={batched(() => {
             changeTab("changes", false);
             void compare("working");
-          }}
-          onCommit={(value) => {
+          })}
+          onCommit={batched((value: string) => {
             setTo(value);
             changeTab("changes", false);
             void compare("commit", { to: value });
-          }}
-          onRangeDraft={(nextFrom, nextTo) => {
+          })}
+          onRangeDraft={batched((nextFrom: string, nextTo: string) => {
             setMode("range");
             setFrom(nextFrom);
             setTo(nextTo);
-          }}
-          onRange={() => {
+          })}
+          onRange={batched(() => {
             changeTab("changes", false);
             void compare("range");
-          }}
-          openRequest={reviewPickerRequest}
+          })}
+          openRequest={reviewPickerRequest()}
         />
         <button
-          className="refresh"
+          class="refresh"
           onClick={() => location.reload()}
           title="Reload files and commits; keep your view and saved comments"
         >
           ↻ <span>Refresh</span>
         </button>
-        <div className="top-actions">
+        <div class="top-actions">
           <button
-            className="finder-trigger"
+            class="finder-trigger"
             title="Find a file (F)"
             onClick={() => setDialog("finder")}
           >
@@ -1107,38 +1167,36 @@ export function Review({
             <kbd>F</kbd>
           </button>
           <button
-            className="shortcut-trigger"
+            class="shortcut-trigger"
             aria-label="Command launcher"
             title="Command launcher (? or Cmd+K)"
             onClick={() => setDialog("commands")}
           >
             ?
           </button>
-          <button className="clear" onClick={clearReview}>
+          <button class="clear" onClick={clearReview}>
             Clear
           </button>
           <button
-            className="primary copy"
-            disabled={!comments.length}
+            class="primary copy"
+            disabled={!comments().length}
             onClick={copyPrompt}
           >
-            {copyLabel}
-            <span className="count">{comments.length}</span>
+            {copyLabel()}
+            <span class="count">{comments().length}</span>
           </button>
         </div>
       </header>
       <div
-        className={`workspace${showFiles ? "" : " hide-files"}${showComments ? "" : " hide-comments"}`}
-        style={
-          {
-            "--files-size": filesWidth ? `${filesWidth}px` : undefined,
-            "--comments-size": commentsWidth ? `${commentsWidth}px` : undefined,
-          } as CSSProperties
-        }
+        class={`workspace${showFiles() ? "" : " hide-files"}${showComments() ? "" : " hide-comments"}`}
+        style={{
+          "--files-size": filesWidth() ? `${filesWidth()}px` : undefined,
+          "--comments-size": commentsWidth() ? `${commentsWidth()}px` : undefined,
+        }}
       >
-        <div className="panel-rail files" hidden={showFiles}>
+        <div class="panel-rail files" hidden={showFiles()}>
           <button
-            className="panel-toggle"
+            class="panel-toggle"
             aria-label="Show file browser"
             title="Show file browser"
             aria-controls="file-browser"
@@ -1148,190 +1206,195 @@ export function Review({
           </button>
         </div>
         <Sidebar
-          tab={tab}
-          paths={paths}
-          entries={entries}
-          lineCounts={info.lineCounts}
-          hasMessage={hasMessage}
-          reviewed={reviewedInView}
-          reviewScope={reviewScope}
-          selected={selected}
+          tab={tab()}
+          paths={paths()}
+          entries={entries()}
+          lineCounts={info().lineCounts}
+          hasMessage={hasMessage()}
+          reviewed={reviewedInView()}
+          reviewScope={reviewScope()}
+          selected={selected()}
           onSelect={select}
           fileHref={fileHref}
-          root={info.root}
-          search={search}
+          root={info().root}
+          search={search()}
           onSearch={setSearch}
-          collapsed={collapsed}
+          collapsed={collapsed()}
           onCollapsedChange={setCollapsed}
           onToggleReviewed={togglePathReviewed}
           onToggleDirectoryReviewed={toggleDirectoryReviewed}
-          revealSelected={diffAll}
+          revealSelected={diffAll()}
           treeOrder={treeOrder}
           onHide={() => setShowFiles(false)}
           onResize={setFilesWidth}
-          hidden={!showFiles}
+          hidden={!showFiles()}
         />
-        <main className="main">
-          {find.open && (
+        <main class="main">
+          <Show when={find.open()}>
             <TextSearchBar
               search={find}
-              onClose={() => {
+              onClose={batched(() => {
                 find.close();
                 focusViewer();
-              }}
+              })}
             />
-          )}
+          </Show>
           <FileHeading
-            path={messageView || paths.includes(selected) ? selected : ""}
-            title={messageView ? `Commit message · ${comparison.target.slice(0, 7)}` : ""}
-            summary={diffAll ? summary : undefined}
+            path={messageView() || paths().includes(selected()) ? selected() : ""}
+            title={messageView() ? `Commit message · ${comparison().target.slice(0, 7)}` : ""}
+            summary={diffAll() ? summary() : undefined}
             href={href}
-            showModes={tab === "changes" && !messageView}
-            viewerMode={viewerMode}
+            showModes={tab() === "changes" && !messageView()}
+            viewerMode={viewerMode()}
             onViewerMode={changeViewerMode}
-            diffView={diffAll}
-            split={split}
+            diffView={diffAll()}
+            split={split()}
             onSplit={setSplit}
-            expandable={diffAll}
-            expanded={expanded}
+            expandable={diffAll()}
+            expanded={expanded()}
             onToggleExpanded={() => setExpanded((value) => !value)}
-            wrap={wrap}
+            wrap={wrap()}
             onToggleWrap={() => setWrap((value) => !value)}
-            reviewed={selectedReviewed}
-            reviewDisabled={loading || comparing}
+            reviewed={selectedReviewed()}
+            reviewDisabled={loading() || comparing()}
             onToggleReviewed={toggleReviewed}
           />
-          {error && (
-            <div role="alert" className="error">
-              {error}
+          <Show when={error()}>
+            <div role="alert" class="error">
+              {error()}
             </div>
-          )}
-          <div
-            className={`code-pane${diffAll ? " all-files" : ""}`}
-            key={diffAll
-              ? `${tab}:${comparison.base}:${comparison.target}:${viewerMode}`
-              : `${tab}:${selected}:${comparison.base}:${comparison.target}:${viewerMode}`}
-          >
-            {loading || comparing || restoring ? (
-              <div className="empty">
-                <p>Loading…</p>
-              </div>
-            ) : !info.isGit && tab === "changes" ? (
-              <div className="empty">
-                <h2>Not a Git repository</h2>
-                <p>You can still browse files and leave comments.</p>
-              </div>
-            ) : (diffAll ? !order.length : tab === "changes" && !paths.length && !messageView) ? (
-              <div className="empty">
-                <span className="empty-symbol">✓</span>
-                <h2>No changes to review</h2>
-                <p>
-                  {compareLabel === "Uncommitted changes"
-                    ? "You have no uncommitted changes."
-                    : "These revisions have no file differences."}
-                  <br />
-                  New changes appear when you refresh.
-                </p>
-              </div>
-            ) : diffAll ? (
-              codeView
-            ) : !messageView && (!selected || !paths.includes(selected)) ? (
-              <div className="empty">
-                <span className="empty-symbol">⌘</span>
-                <h2>A little space for a better review.</h2>
-                <p>
-                  Choose a file on the left.
-                  <br />
-                  Select a line number to leave a comment.
-                </p>
-                <div className="empty-steps">
-                  <span>01 &nbsp; Read</span>
-                  <span>02 &nbsp; Comment</span>
-                  <span>03 &nbsp; Copy</span>
-                </div>
-              </div>
-            ) : notice ? (
-              <div className="empty">
-                <h2>Preview unavailable</h2>
-                <p>{notice}</p>
-              </div>
-            ) : content && singleSide && !fileSource ? (
-              <div className="empty">
-                <h2>File does not exist in the {viewerMode} revision</h2>
-                <p>{viewerMode === "old" ? "This file was added." : "This file was deleted."}</p>
-              </div>
-            ) : content && (content.newFile || content.oldFile) ? (
-              <>
-                {codeView}
-                {!fileSource?.contents && (
-                  <p className="empty">Empty file</p>
-                )}
-              </>
-            ) : (
-              content && (
-                <div className="empty">
-                  <p>File no longer exists. Refresh to update the file list.</p>
-                </div>
-              )
-            )}
-          </div>
-          <div className="code-footer">
+          </Show>
+          <Show when={paneKey()} keyed>
+            <div class={`code-pane${diffAll() ? " all-files" : ""}`}>
+              <Switch>
+                <Match when={loading() || comparing() || restoring()}>
+                  <div class="empty">
+                    <p>Loading…</p>
+                  </div>
+                </Match>
+                <Match when={!info().isGit && tab() === "changes"}>
+                  <div class="empty">
+                    <h2>Not a Git repository</h2>
+                    <p>You can still browse files and leave comments.</p>
+                  </div>
+                </Match>
+                <Match when={diffAll() ? !order().length : tab() === "changes" && !paths().length && !messageView()}>
+                  <div class="empty">
+                    <span class="empty-symbol">✓</span>
+                    <h2>No changes to review</h2>
+                    <p>
+                      {compareLabel() === "Uncommitted changes"
+                        ? "You have no uncommitted changes."
+                        : "These revisions have no file differences."}
+                      <br />
+                      New changes appear when you refresh.
+                    </p>
+                  </div>
+                </Match>
+                <Match when={diffAll()}>
+                  {codeView()}
+                </Match>
+                <Match when={!messageView() && (!selected() || !paths().includes(selected()))}>
+                  <div class="empty">
+                    <span class="empty-symbol">⌘</span>
+                    <h2>A little space for a better review.</h2>
+                    <p>
+                      Choose a file on the left.
+                      <br />
+                      Select a line number to leave a comment.
+                    </p>
+                    <div class="empty-steps">
+                      <span>01 &nbsp; Read</span>
+                      <span>02 &nbsp; Comment</span>
+                      <span>03 &nbsp; Copy</span>
+                    </div>
+                  </div>
+                </Match>
+                <Match when={notice()}>
+                  <div class="empty">
+                    <h2>Preview unavailable</h2>
+                    <p>{notice()}</p>
+                  </div>
+                </Match>
+                <Match when={content() && singleSide() && !fileSource()}>
+                  <div class="empty">
+                    <h2>File does not exist in the {viewerMode()} revision</h2>
+                    <p>{viewerMode() === "old" ? "This file was added." : "This file was deleted."}</p>
+                  </div>
+                </Match>
+                <Match when={content() && (content()!.newFile || content()!.oldFile)}>
+                  {codeView()}
+                  <Show when={!fileSource()?.contents}>
+                    <p class="empty">Empty file</p>
+                  </Show>
+                </Match>
+                <Match when={content()}>
+                  <div class="empty">
+                    <p>File no longer exists. Refresh to update the file list.</p>
+                  </div>
+                </Match>
+              </Switch>
+            </div>
+          </Show>
+          <div class="code-footer">
             <span>
-              {tab === "changes"
-                ? compareLabel
+              {tab() === "changes"
+                ? compareLabel()
                 : "Click a line number to comment · Shift-click for a range"}
             </span>
-            {range && (
-              <span>
-                Ln {start}
-                {end !== start ? `–${end}` : ""}
-                {range.side === "deletions" ? " · old side" : ""}
-              </span>
-            )}
+            <Show when={range()}>
+              {(value) => (
+                <span>
+                  Ln {start()}
+                  {end() !== start() ? `–${end()}` : ""}
+                  {value().side === "deletions" ? " · old side" : ""}
+                </span>
+              )}
+            </Show>
           </div>
         </main>
         <CommentsPanel
-          comments={comments}
-          highlight={highlight}
+          comments={comments()}
+          highlight={highlight()}
           onHighlight={setHighlight}
           onOpen={(comment) => void openComment(comment)}
-          editing={editing}
-          draft={draft}
+          editing={editing()}
+          draft={draft()}
           onDraftChange={setDraft}
-          onEdit={(comment) => {
+          onEdit={batched((comment: Comment) => {
             setEditing(comment.id);
             setRange(null);
             setDraft(comment.text);
-          }}
-          onDelete={(comment) => {
+          })}
+          onDelete={batched((comment: Comment) => {
             setComments((items) => items.filter((item) => item.id !== comment.id));
-            if (editing === comment.id) cancelComment();
+            if (editing() === comment.id) cancelComment();
             setCopied(false);
-          }}
+          })}
           onSave={saveComment}
           onCancel={cancelComment}
-          generalDraft={generalDraft}
+          generalDraft={generalDraft()}
           onGeneralDraftChange={setGeneralDraft}
           onSaveGeneral={saveGeneralComment}
-          newComment={!editing && range && rangePath ? {
+          newComment={!editing() && range() && rangePath() ? {
             reference: reference({
-              path: rangePath,
-              start,
-              end,
-              commit: isMessage(rangePath) ? comparison.target : undefined,
+              path: rangePath(),
+              start: start(),
+              end: end(),
+              commit: isMessage(rangePath()) ? comparison().target : undefined,
             }),
-            oldSide: range.side === "deletions",
+            oldSide: range()!.side === "deletions",
           } : null}
-          selecting={!!range}
-          errors={[copyError, storageError]}
+          selecting={!!range()}
+          errors={[copyError(), storageError()]}
           onPreview={() => setDialog("prompt")}
           onHide={() => setShowComments(false)}
           onResize={setCommentsWidth}
-          hidden={!showComments}
+          hidden={!showComments()}
         />
-        <div className="panel-rail comments" hidden={showComments}>
+        <div class="panel-rail comments" hidden={showComments()}>
           <button
-            className="panel-toggle"
+            class="panel-toggle"
             aria-label="Show comments"
             title="Show comments (M)"
             aria-controls="review-comments"
@@ -1341,60 +1404,62 @@ export function Review({
           </button>
         </div>
       </div>
-      <footer className="statusbar">
-        <span>⑂ {info.branch || "Files"}</span>
-        <span>{info.isGit ? "Git" : "Folder"} · read-only</span>
-        <span className="status-right">
+      <footer class="statusbar">
+        <span>⑂ {info().branch || "Files"}</span>
+        <span>{info().isGit ? "Git" : "Folder"} · read-only</span>
+        <span class="status-right">
           No auto-refresh
-          <span className="status-dot" />
+          <span class="status-dot" />
           Refresh when you’re ready.
-          <span className="status-dot" />
+          <span class="status-dot" />
           rv {__RV_VERSION__}
         </span>
       </footer>
-      {dialog === "prompt" && (
-        <PromptDialog
-          prompt={prompt}
-          copyLabel={copyLabel}
-          onCopy={copyPrompt}
-          onClose={closeDialog}
-        />
-      )}
-      {dialog === "copied" && (
-        <CopiedPromptDialog prompt={prompt} onClear={clearCopiedReview} onClose={closeDialog} />
-      )}
-      {dialog === "finder" && (
-        <FileFinder
-          paths={hasMessage ? [MESSAGE_PATH, ...paths] : paths}
-          reviewed={reviewedInView || []}
-          onSelect={select}
-          fileHref={fileHref}
-          onClose={closeDialog}
-        />
-      )}
-      {dialog === "commands" && (
-        <CommandLauncher
-          onClose={closeDialog}
-          onChoose={(command) => {
-            closeDialog();
-            runCommand(command);
-          }}
-        />
-      )}
-      {dialog === "line" && (
-        <LinePicker
-          path={selected}
-          initialTarget={range ? `${start}${end !== start ? `-${end}` : ""}` : ""}
-          initialSide={singleSide || (range?.side === "deletions" ? "deletions" : "additions")}
-          showSide={diffAll && !isMessage(selected)}
-          lineCount={(side) => {
-            const source = side === "deletions" ? content?.oldFile : content?.newFile;
-            return source?.contents ? source.contents.split("\n").length : 0;
-          }}
-          onPick={pickLines}
-          onClose={closeDialog}
-        />
-      )}
+      <Switch>
+        <Match when={dialog() === "prompt"}>
+          <PromptDialog
+            prompt={prompt()}
+            copyLabel={copyLabel()}
+            onCopy={copyPrompt}
+            onClose={closeDialog}
+          />
+        </Match>
+        <Match when={dialog() === "copied"}>
+          <CopiedPromptDialog prompt={prompt()} onClear={clearCopiedReview} onClose={closeDialog} />
+        </Match>
+        <Match when={dialog() === "finder"}>
+          <FileFinder
+            paths={hasMessage() ? [MESSAGE_PATH, ...paths()] : paths()}
+            reviewed={reviewedInView() || []}
+            onSelect={select}
+            fileHref={fileHref}
+            onClose={closeDialog}
+          />
+        </Match>
+        <Match when={dialog() === "commands"}>
+          <CommandLauncher
+            onClose={closeDialog}
+            onChoose={batched((command: Command) => {
+              closeDialog();
+              runCommand(command);
+            })}
+          />
+        </Match>
+        <Match when={dialog() === "line"}>
+          <LinePicker
+            path={selected()}
+            initialTarget={range() ? `${start()}${end() !== start() ? `-${end()}` : ""}` : ""}
+            initialSide={singleSide() || (range()?.side === "deletions" ? "deletions" : "additions")}
+            showSide={diffAll() && !isMessage(selected())}
+            lineCount={(side) => {
+              const source = side === "deletions" ? content()?.oldFile : content()?.newFile;
+              return source?.contents ? source.contents.split("\n").length : 0;
+            }}
+            onPick={pickLines}
+            onClose={closeDialog}
+          />
+        </Match>
+      </Switch>
     </div>
   );
 }

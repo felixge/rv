@@ -1,34 +1,35 @@
+import { Show } from "solid-js";
+
 // Line totals for repository files, or +/− change counts for diffs.
-export function LineStats({
-  lines,
-  additions = 0,
-  deletions = 0,
-  title,
-  className = "line-stats",
-}: {
+export function LineStats(props: {
   lines?: number;
   additions?: number;
   deletions?: number;
   title?: string;
-  className?: string;
+  class?: string;
 }) {
-  const total = lines?.toLocaleString("en-US");
+  const total = () => props.lines?.toLocaleString("en-US");
+  const additions = () => props.additions || 0;
+  const deletions = () => props.deletions || 0;
   return (
     <span
-      className={className}
-      title={title}
-      aria-label={total !== undefined
-        ? `${total} total lines of code`
-        : `${additions} lines added, ${deletions} lines removed`}
+      class={props.class || "line-stats"}
+      title={props.title}
+      aria-label={total() !== undefined
+        ? `${total()} total lines of code`
+        : `${additions()} lines added, ${deletions()} lines removed`}
     >
-      {total !== undefined ? (
-        <span className="lines-total">{total} lines</span>
-      ) : (
-        <>
-          <span className="lines-added">+{additions}</span>
-          <span className="lines-removed">−{deletions}</span>
-        </>
-      )}
+      <Show
+        when={total() !== undefined}
+        fallback={
+          <>
+            <span class="lines-added">+{additions()}</span>
+            <span class="lines-removed">−{deletions()}</span>
+          </>
+        }
+      >
+        <span class="lines-total">{total()} lines</span>
+      </Show>
     </span>
   );
 }

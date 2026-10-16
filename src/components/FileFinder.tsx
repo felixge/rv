@@ -1,89 +1,81 @@
-import { useMemo, useState } from "react";
-import { onPlainClick, useListNavigation } from "../lib/events";
+import { createMemo, createSignal, For, Show } from "solid-js";
+import { autofocus, useListNavigation, onPlainClick } from "../lib/events";
 import { compareTreePaths, fuzzyScore } from "../lib/sort";
 import { MESSAGE_PATH } from "../types";
 import { Modal } from "./Modal";
 
-export function FileFinder({
-  paths,
-  reviewed,
-  onSelect,
-  fileHref,
-  onClose,
-}: {
+export function FileFinder(props: {
   paths: string[];
   reviewed: string[];
   onSelect: (path: string) => void;
   fileHref: (path: string) => string;
   onClose: () => void;
 }) {
-  const [query, setQuery] = useState("");
-  const matches = useMemo(
-    () => paths
-      .flatMap((path, order) => {
-        const label = path === MESSAGE_PATH ? "Commit message" : path;
-        const score = fuzzyScore(label, query);
-        return score === null ? [] : [{ path, label, order, score }];
-      })
-      .sort((left, right) =>
-        left.score - right.score ||
-        compareTreePaths(left.label, right.label) ||
-        left.order - right.order,
-      )
-      .slice(0, 100),
-    [paths, query],
-  );
+  const [query, setQuery] = createSignal("");
+  const matches = createMemo(() => props.paths
+    .flatMap((path, order) => {
+      const label = path === MESSAGE_PATH ? "Commit message" : path;
+      const score = fuzzyScore(label, query());
+      return score === null ? [] : [{ path, label, order, score }];
+    })
+    .sort((left, right) =>
+      left.score - right.score ||
+      compareTreePaths(left.label, right.label) ||
+      left.order - right.order,
+    )
+    .slice(0, 100));
   const choose = (path: string) => {
-    onSelect(path);
-    onClose();
+    props.onSelect(path);
+    props.onClose();
   };
   const list = useListNavigation(matches, (match) => choose(match.path));
   return (
     <Modal
-      backdropClassName="finder-backdrop"
-      className="file-finder"
+      backdropClass="finder-backdrop"
+      class="file-finder"
       aria-labelledby="file-finder-title"
-      onClose={onClose}
+      onClose={props.onClose}
     >
         <h2 id="file-finder-title">Find a file</h2>
-        <div className="finder-search">
+        <div class="finder-search">
           <span aria-hidden="true">⌕</span>
           <input
-            autoFocus
+            ref={autofocus}
             aria-label="Fuzzy find file"
             placeholder="Type part of a file path…"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
+            value={query()}
+            onInput={(event) => {
+              setQuery(event.currentTarget.value);
               list.setActive(0);
             }}
             onKeyDown={list.onKeyDown}
           />
           <kbd>F</kbd>
         </div>
-        <div className="finder-results" role="listbox" aria-label="Files">
-          {matches.map((match, index) => {
-            const done = reviewed.includes(match.path);
-            return (
-              <a
-                key={match.path}
-                href={fileHref(match.path)}
-                className={index === list.active ? "active" : ""}
-                role="option"
-                aria-selected={index === list.active}
-                onMouseEnter={() => list.setActive(index)}
-                onClick={onPlainClick(() => choose(match.path))}
-              >
-                <span className="finder-path">{match.label}</span>
-                <span className={`finder-state${done ? " reviewed" : ""}`}>
-                  {done ? "✓ Reviewed" : "Unreviewed"}
-                </span>
-              </a>
-            );
-          })}
-          {!matches.length && <p>No matching files.</p>}
+        <div class="finder-results" role="listbox" aria-label="Files">
+          <For each={matches()}>
+            {(match, index) => {
+              const done = () => props.reviewed.includes(match.path);
+              return (
+                <a
+                  href={props.fileHref(match.path)}
+                  class={index() === list.active() ? "active" : ""}
+                  role="option"
+                  aria-selected={index() === list.active()}
+                  onMouseEnter={() => list.setActive(index())}
+                  onClick={onPlainClick(() => choose(match.path))}
+                >
+                  <span class="finder-path">{match.label}</span>
+                  <span class={`finder-state${done() ? " reviewed" : ""}`}>
+                    {done() ? "✓ Reviewed" : "Unreviewed"}
+                  </span>
+                </a>
+              );
+            }}
+          </For>
+          <Show when={!matches().length}><p>No matching files.</p></Show>
         </div>
-        <div className="finder-footer">
+        <div class="finder-footer">
           <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
           <span><kbd>Enter</kbd> Open</span>
           <span><kbd>Esc</kbd> Close</span>

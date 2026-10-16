@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
 
 // Modified clicks keep the browser's link behavior (new tab, window, download).
 export function onPlainClick(action: () => void = () => {}) {
@@ -18,42 +18,77 @@ export function onCmdEnter(action: () => void) {
   };
 }
 
+// Whether a pointer is pressed, from pointerdown until pointerup.
+let pressing = false;
+addEventListener("pointerdown", () => {
+  pressing = true;
+}, true);
+for (const type of ["pointerup", "pointercancel"])
+  addEventListener(type, () => {
+    pressing = false;
+  }, true);
+
+// Use as ref={autofocus}: focuses the element once it is mounted. An element
+// mounted by a pointerdown would lose focus to the mousedown that follows, so
+// it keeps focus until that press ends.
+export function autofocus(element: HTMLElement) {
+  onMount(() => {
+    element.focus();
+    if (!pressing) return;
+    const refocus = (event: FocusEvent) => {
+      if (event.target === element) return;
+      stop();
+      element.focus();
+    };
+    const stop = () => {
+      document.removeEventListener("focusin", refocus);
+      removeEventListener("pointerup", stop, true);
+      removeEventListener("pointercancel", stop, true);
+    };
+    document.addEventListener("focusin", refocus);
+    addEventListener("pointerup", stop, true);
+    addEventListener("pointercancel", stop, true);
+    onCleanup(stop);
+  });
+}
+
 // Arrow keys move through a filtered list and Enter chooses the active item.
 export function useListNavigation<T>(
-  items: T[],
+  items: Accessor<T[]>,
   choose: (item: T) => void,
   wrap = true,
 ) {
-  const [active, setActive] = useState(0);
+  const [active, setActive] = createSignal(0);
   const onKeyDown = (event: KeyboardEvent) => {
+    const list = items();
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (!items.length) return;
+      if (!list.length) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
       setActive((current) => wrap
-        ? (current + step + items.length) % items.length
-        : Math.max(0, Math.min(items.length - 1, current + step)));
+        ? (current + step + list.length) % list.length
+        : Math.max(0, Math.min(list.length - 1, current + step)));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      if (items[active]) choose(items[active]);
+      if (list[active()]) choose(list[active()]);
     }
   };
   return { active, setActive, onKeyDown };
 }
 
 export function useOutsidePointerDown(
-  ref: RefObject<HTMLElement | null>,
-  active: boolean,
+  element: () => HTMLElement | undefined,
+  active: Accessor<boolean>,
   onOutside: () => void,
 ) {
-  useEffect(() => {
-    if (!active) return;
+  createEffect(on(active, (isActive) => {
+    if (!isActive) return;
     const dismiss = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onOutside();
+      if (!element()?.contains(event.target as Node)) onOutside();
     };
     document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [active]);
+    onCleanup(() => document.removeEventListener("pointerdown", dismiss));
+  }));
 }
 
 export function isTyping(target: EventTarget | null) {

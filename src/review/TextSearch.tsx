@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import type { FileDiffMetadata } from "@pierre/diffs";
-import type { CodeViewHandle } from "@pierre/diffs/react";
+import type { CodeViewInstance } from "../components/CodeView";
 import {
   highlightStyles,
   lineSide,
@@ -25,108 +25,102 @@ export type TextSearchSource = {
 
 // Find (Cmd/Ctrl+F) in the viewed file, or in every file of the all-files
 // diff, plus highlighting other occurrences of text selected on a single line.
-export function useTextSearch({
-  sources,
-  split,
-  expanded,
-  contentKey,
-  viewerMode,
-  selected,
-  viewer,
-}: {
-  sources: TextSearchSource[];
-  split: boolean;
-  expanded: boolean;
-  contentKey: string;
-  viewerMode: ViewerMode;
-  selected: string;
-  viewer: RefObject<CodeViewHandle<Comment, undefined> | null>;
+export function useTextSearch(options: {
+  sources: Accessor<TextSearchSource[]>;
+  split: Accessor<boolean>;
+  expanded: Accessor<boolean>;
+  contentKey: Accessor<string>;
+  viewerMode: Accessor<ViewerMode>;
+  selected: Accessor<string>;
+  viewer: Accessor<CodeViewInstance<Comment> | undefined>;
 }) {
-  const [open, setOpen] = useState(false);
-  const [highlightSelectedText, setHighlightSelectedText] = useState(false);
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
-  const selectedMatch = useRef<number | null>(null);
-  const findAll = (text: string) => sources.flatMap(({ path, file, diff }) =>
-    textSearchMatches(text, file || null, diff || null, split, expanded)
+  const { sources, split, expanded, contentKey, viewerMode, selected, viewer } = options;
+  const [open, setOpen] = createSignal(false);
+  const [highlightSelectedText, setHighlightSelectedText] = createSignal(false);
+  const [query, setQuery] = createSignal("");
+  const [active, setActive] = createSignal(0);
+  let input: HTMLInputElement | undefined;
+  let selectedMatch: number | null = null;
+  const findAll = (text: string) => sources().flatMap(({ path, file, diff }) =>
+    textSearchMatches(text, file || null, diff || null, split(), expanded())
       .map((match) => ({ ...match, path })));
-  const matches = useMemo(() => findAll(query), [query, sources, split, expanded]);
-  const current = matches[active];
+  const matches = createMemo(() => findAll(query()));
+  const current = createMemo(() => matches()[active()]);
   // The rendered <diffs-container> of each file in the virtual window.
-  const hosts = () => viewer.current?.getInstance()?.getRenderedItems() || [];
+  const hosts = () => viewer()?.getRenderedItems() || [];
 
-  useEffect(() => {
-    const onTextSelection = (event: Event) => {
-      const host = hosts().find((item) => event.composedPath().includes(item.element));
-      const shadow = host?.element.shadowRoot;
-      if (!host) return;
-      const selection = (
-        shadow as ShadowRoot & { getSelection?: () => Selection | null }
-      )?.getSelection?.() || document.getSelection();
-      const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
-      const lineOf = (node: Node | undefined) =>
-        (node instanceof Element ? node : node?.parentElement)?.closest<HTMLElement>("[data-line]");
-      const startLine = lineOf(range?.startContainer);
-      const text = selection?.toString() || "";
-      if (
-        !range || range.collapsed || !shadow || !startLine ||
-        startLine !== lineOf(range.endContainer) || !shadow.contains(startLine) ||
-        text.includes("\n")
-      ) {
-        setHighlightSelectedText(false);
-        return;
-      }
-      const beforeSelection = document.createRange();
-      beforeSelection.selectNodeContents(startLine);
-      beforeSelection.setEnd(range.startContainer, range.startOffset);
-      const start = beforeSelection.toString().length;
-      const side = lineSide(startLine);
-      const index = findAll(text).findIndex((match) =>
-        match.path === host.id && match.line === Number(startLine.dataset.line) &&
-        match.start === start && match.side === side);
-      if (index === -1) {
-        setHighlightSelectedText(false);
-        return;
-      }
+  const onTextSelection = (event: Event) => {
+    const host = hosts().find((item) => event.composedPath().includes(item.element));
+    const shadow = host?.element.shadowRoot;
+    if (!host) return;
+    const selection = (
+      shadow as ShadowRoot & { getSelection?: () => Selection | null }
+    )?.getSelection?.() || document.getSelection();
+    const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
+    const lineOf = (node: Node | undefined) =>
+      (node instanceof Element ? node : node?.parentElement)?.closest<HTMLElement>("[data-line]");
+    const startLine = lineOf(range?.startContainer);
+    const text = selection?.toString() || "";
+    if (
+      !range || range.collapsed || !shadow || !startLine ||
+      startLine !== lineOf(range.endContainer) || !shadow.contains(startLine) ||
+      text.includes("\n")
+    ) {
+      setHighlightSelectedText(false);
+      return;
+    }
+    const beforeSelection = document.createRange();
+    beforeSelection.selectNodeContents(startLine);
+    beforeSelection.setEnd(range.startContainer, range.startOffset);
+    const start = beforeSelection.toString().length;
+    const side = lineSide(startLine);
+    const index = findAll(text).findIndex((match) =>
+      match.path === host.id && match.line === Number(startLine.dataset.line) &&
+      match.start === start && match.side === side);
+    if (index === -1) {
+      setHighlightSelectedText(false);
+      return;
+    }
+    batch(() => {
       setQuery(text);
-      selectedMatch.current = index;
+      selectedMatch = index;
       setActive(index);
       setHighlightSelectedText(true);
       setOpen(false);
-    };
-    document.addEventListener("pointerup", onTextSelection);
-    document.addEventListener("dblclick", onTextSelection);
-    return () => {
-      document.removeEventListener("pointerup", onTextSelection);
-      document.removeEventListener("dblclick", onTextSelection);
-    };
-  }, [sources, split, expanded]);
-  useEffect(() => setHighlightSelectedText(false), [contentKey, viewerMode]);
-  useEffect(() => {
+    });
+  };
+  document.addEventListener("pointerup", onTextSelection);
+  document.addEventListener("dblclick", onTextSelection);
+  onCleanup(() => {
+    document.removeEventListener("pointerup", onTextSelection);
+    document.removeEventListener("dblclick", onTextSelection);
+  });
+  createEffect(on([contentKey, viewerMode], () => setHighlightSelectedText(false)));
+  createEffect(on([query, contentKey, viewerMode, split, expanded], () => {
     // Start at the first match in or after the selected file.
-    const after = new Set(sources
-      .slice(Math.max(0, sources.findIndex((source) => source.path === selected)))
+    const all = sources();
+    const after = new Set(all
+      .slice(Math.max(0, all.findIndex((source) => source.path === selected())))
       .map((source) => source.path));
-    setActive(selectedMatch.current ??
-      Math.max(0, matches.findIndex((match) => after.has(match.path))));
-    selectedMatch.current = null;
-  }, [query, contentKey, viewerMode, split, expanded]);
-  useEffect(() => {
+    setActive(selectedMatch ??
+      Math.max(0, matches().findIndex((match) => after.has(match.path))));
+    selectedMatch = null;
+  }));
+  createEffect(on([open, current, selected, viewer], ([isOpen, match, path, instance]) => {
     // In the all-files diff, the viewed file follows the match first:
     // re-rendering for a new selection would cancel an earlier scroll.
-    if (!open || !current || current.path !== selected || !viewer.current) return;
-    viewer.current.scrollTo({
+    if (!isOpen || !match || match.path !== path) return;
+    instance?.scrollTo({
       type: "line",
-      id: current.path,
-      lineNumber: current.line,
-      side: current.side,
+      id: match.path,
+      lineNumber: match.line,
+      side: match.side,
       align: "center",
     });
-  }, [open, current, selected]);
-  useEffect(() => {
+  }));
+  createEffect(on([open, highlightSelectedText, matches, current, contentKey, viewerMode, viewer], ([isOpen, highlightSelection, all, match]) => {
     clearHighlights();
-    if ((!open && !highlightSelectedText) || !current) return;
+    if ((!isOpen && !highlightSelection) || !match) return;
     const styled = new Map<ShadowRoot, HTMLStyleElement>();
     const observer = new MutationObserver(() => applyHighlights());
     const applyHighlights = () => {
@@ -154,17 +148,17 @@ export function useTextSearch({
         }
         renderedLines.set(host.id, lines);
       }
-      const rangeFor = (match: typeof current) => {
-        const lines = renderedLines.get(match.path);
-        return lines ? rangeForMatch(match, lines) : null;
+      const rangeFor = (target: typeof match) => {
+        const lines = renderedLines.get(target.path);
+        return lines ? rangeForMatch(target, lines) : null;
       };
-      const otherRanges = matches
-        .filter((match) => match !== current)
+      const otherRanges = all
+        .filter((other) => other !== match)
         .map(rangeFor)
         .filter((range): range is Range => range !== null);
       if (otherRanges.length)
         CSS.highlights.set(textSearchMatchesHighlightName, new Highlight(...otherRanges));
-      const activeRange = rangeFor(current);
+      const activeRange = rangeFor(match);
       if (activeRange) CSS.highlights.set(textSearchHighlightName, new Highlight(activeRange));
     };
     applyHighlights();
@@ -172,72 +166,79 @@ export function useTextSearch({
     // token nodes. It also replaces lines as they enter and leave the virtual
     // window, and mounts files as they scroll into view, so rebuild the Ranges
     // after any of these DOM changes.
-    const container = viewer.current?.getInstance()?.getContainerElement();
+    const container = viewer()?.getContainerElement();
     if (container) observer.observe(container, { childList: true, subtree: true });
-    return () => {
+    onCleanup(() => {
       observer.disconnect();
       clearHighlights();
       for (const style of styled.values()) style.remove();
-    };
-  }, [open, highlightSelectedText, matches, current, contentKey, viewerMode]);
+    });
+  }));
 
   const move = (offset: number) => {
-    if (!matches.length) return;
-    setActive((index) => (index + offset + matches.length) % matches.length);
+    const count = matches().length;
+    if (!count) return;
+    setActive((index) => (index + offset + count) % count);
   };
   const show = () => {
-    setHighlightSelectedText(false);
-    setOpen(true);
+    batch(() => {
+      setHighlightSelectedText(false);
+      setOpen(true);
+    });
     requestAnimationFrame(() => {
-      input.current?.focus();
-      input.current?.select();
+      input?.focus();
+      input?.select();
     });
   };
   const findNext = (offset: number) => {
-    if (!query) return show();
-    setHighlightSelectedText(false);
-    setOpen(true);
-    move(offset);
+    if (!query()) return show();
+    batch(() => {
+      setHighlightSelectedText(false);
+      setOpen(true);
+      move(offset);
+    });
   };
   return {
-    open, query, setQuery, matches, active, input, move, show, findNext,
+    open, query, setQuery, matches, active, move, show, findNext,
+    input: (element: HTMLInputElement) => {
+      input = element;
+    },
     close: () => setOpen(false),
   };
 }
 
-export function TextSearchBar({
-  search,
-  onClose,
-}: {
+export function TextSearchBar(props: {
   search: ReturnType<typeof useTextSearch>;
   onClose: () => void;
 }) {
-  const { query, matches, active, move } = search;
+  const { search } = props;
   return (
-    <div className="text-search" role="search">
+    <div class="text-search" role="search">
       <input
         ref={search.input}
         aria-label="Find in viewed file"
         placeholder="Find"
-        value={query}
-        onChange={(event) => search.setQuery(event.target.value)}
+        value={search.query()}
+        onInput={(event) => search.setQuery(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            move(event.shiftKey ? -1 : 1);
+            search.move(event.shiftKey ? -1 : 1);
           }
         }}
       />
       <span aria-live="polite">
-        {query ? `${matches.length ? active + 1 : 0}/${matches.length}` : "0/0"}
+        {search.query()
+          ? `${search.matches().length ? search.active() + 1 : 0}/${search.matches().length}`
+          : "0/0"}
       </span>
-      <button aria-label="Previous match" disabled={!matches.length} onClick={() => move(-1)}>
+      <button aria-label="Previous match" disabled={!search.matches().length} onClick={() => search.move(-1)}>
         ↑
       </button>
-      <button aria-label="Next match" disabled={!matches.length} onClick={() => move(1)}>
+      <button aria-label="Next match" disabled={!search.matches().length} onClick={() => search.move(1)}>
         ↓
       </button>
-      <button aria-label="Close find" onClick={onClose}>
+      <button aria-label="Close find" onClick={() => props.onClose()}>
         ×
       </button>
     </div>

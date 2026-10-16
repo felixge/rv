@@ -1,43 +1,42 @@
-import { useEffect, useRef, useState } from "react";
+import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { patchState } from "../lib/api";
 import type { SavedState } from "../types";
 
 // Saves review state to the server-side disk cache, debounced. Send only
 // changed sections: navigation or preferences in another tab must never write
 // its stale copy of comments back over the shared review.
-export function useSavedState(initial: SavedState, next: SavedState) {
-  const [error, setError] = useState("");
-  const saved = useRef(initial);
-  const pending = useRef<SavedState>({});
-  const dirty = useRef(false);
-  const flush = useRef((keepalive = false) => {
-    if (!dirty.current) return;
-    dirty.current = false;
-    const patch = pending.current;
-    pending.current = {};
+export function useSavedState(initial: SavedState, next: () => SavedState) {
+  const [error, setError] = createSignal("");
+  let saved = initial;
+  let pending: SavedState = {};
+  let dirty = false;
+  const flush = (keepalive = false) => {
+    if (!dirty) return;
+    dirty = false;
+    const patch = pending;
+    pending = {};
     patchState(patch, keepalive).catch(() => {
-      pending.current = { ...patch, ...pending.current };
-      dirty.current = true;
+      pending = { ...patch, ...pending };
+      dirty = true;
       setError("Could not save review state to disk. Copy your comments before closing.");
     });
-  }).current;
+  };
 
-  const serialized = JSON.stringify(next);
-  useEffect(() => {
+  const serialized = createMemo(() => JSON.stringify(next()));
+  createEffect(on(serialized, () => {
+    const current = next();
     for (const key of ["view", "reviewed", "comments"] as const) {
-      if (JSON.stringify(next[key]) !== JSON.stringify(saved.current[key])) {
-        pending.current = { ...pending.current, [key]: next[key] };
-        dirty.current = true;
+      if (JSON.stringify(current[key]) !== JSON.stringify(saved[key])) {
+        pending = { ...pending, [key]: current[key] };
+        dirty = true;
       }
     }
-    saved.current = next;
+    saved = current;
     const timer = setTimeout(() => flush(), 250);
-    return () => clearTimeout(timer);
-  }, [serialized]);
-  useEffect(() => {
-    const flushOnHide = () => flush(true);
-    window.addEventListener("pagehide", flushOnHide);
-    return () => window.removeEventListener("pagehide", flushOnHide);
-  }, []);
+    onCleanup(() => clearTimeout(timer));
+  }));
+  const flushOnHide = () => flush(true);
+  window.addEventListener("pagehide", flushOnHide);
+  onCleanup(() => window.removeEventListener("pagehide", flushOnHide));
   return error;
 }

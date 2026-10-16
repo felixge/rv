@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from "react";
-import { FileTree, useFileTree } from "@pierre/trees/react";
-import { themeToTreeStyles, type GitStatus } from "@pierre/trees";
+import { createEffect, createMemo, on, onCleanup, onMount, untrack, type JSX } from "solid-js";
+import { FileTree, themeToTreeStyles, type GitStatus } from "@pierre/trees";
 import { rememberScroll, restoreScroll } from "../lib/scroll";
 import { compareTreePaths } from "../lib/sort";
 import { MESSAGE_PATH, MESSAGE_TREE_PATH, type Entry } from "../types";
@@ -29,7 +28,7 @@ const treeStyle = themeToTreeStyles({
 const inactiveTreeStyle = {
   ...treeStyle,
   "--trees-focus-ring-color-override": "transparent",
-} as CSSProperties;
+} as JSX.CSSProperties;
 
 type Stat = { additions: number; deletions: number };
 const compact = (n: number) =>
@@ -62,24 +61,16 @@ export function directoryPaths(paths: string[]) {
   )];
 }
 
-export function BrowserTree({
-  paths,
-  entries,
-  selected,
-  includeMessage,
-  onSelect,
-  onOrderChange,
-  fileHref,
-  scrollRoot,
-  scrollKey,
-  reviewed,
-  onToggleReviewed,
-  onToggleDirectoryReviewed,
-  search,
-  collapsed,
-  onCollapse,
-  reveal,
-}: {
+declare module "solid-js" {
+  namespace JSX {
+    interface IntrinsicElements {
+      "file-tree-container": HTMLAttributes<HTMLElement>;
+    }
+  }
+}
+
+// Created with its paths: the parent remounts it when they change.
+export function BrowserTree(props: {
   paths: string[];
   entries: Entry[];
   selected: string;
@@ -98,31 +89,16 @@ export function BrowserTree({
   // Scroll the selected file into view, as the all-files diff scrolls.
   reveal: boolean;
 }) {
-  const selectRef = useRef(onSelect);
-  const hrefRef = useRef(fileHref);
-  hrefRef.current = fileHref;
-  const toggleReviewedRef = useRef(onToggleReviewed);
-  const toggleDirectoryRef = useRef(onToggleDirectoryReviewed);
-  const collapseRef = useRef(onCollapse);
-  const collapsedRef = useRef(collapsed);
-  const searchRef = useRef(search);
-  toggleReviewedRef.current = onToggleReviewed;
-  toggleDirectoryRef.current = onToggleDirectoryReviewed;
-  collapseRef.current = onCollapse;
-  collapsedRef.current = collapsed;
-  searchRef.current = search;
-  const syncingSelection = useRef(false);
-  const syncingExpansion = useRef(false);
-  const treePaths = useMemo(
-    () => includeMessage ? [MESSAGE_TREE_PATH, ...paths] : paths,
-    [includeMessage, paths],
-  );
-  selectRef.current = (path) => {
-    if (treePaths.includes(path)) onSelect(fromTree(path));
-  };
-  const statsRef = useRef(new Map<string, Stat>());
-  statsRef.current = useMemo(() => diffStats(entries), [entries]);
-  const { model } = useFileTree({
+  let host!: HTMLElement;
+  // The tree calls back during its own (Preact) updates. Apply the change
+  // afterwards: unmounting the tree mid-update leaks its listeners.
+  const later = (action: () => void) => queueMicrotask(action);
+  let syncingSelection = false;
+  let syncingExpansion = false;
+  const { paths, includeMessage, reviewed } = untrack(() => ({ ...props }));
+  const treePaths = includeMessage ? [MESSAGE_TREE_PATH, ...paths] : paths;
+  const stats = createMemo(() => diffStats(props.entries));
+  const model = new FileTree({
     paths: treePaths,
     sort: (left, right) =>
       left.path === MESSAGE_TREE_PATH ? -1 : right.path === MESSAGE_TREE_PATH ? 1 :
@@ -130,13 +106,13 @@ export function BrowserTree({
     initialExpansion: "open",
     density: "compact",
     icons: "standard",
-    initialSelectedPaths: selected
-      ? [toTree(selected)]
+    initialSelectedPaths: untrack(() => props.selected)
+      ? [toTree(untrack(() => props.selected))]
       : [],
     onSelectionChange: (items) => {
-      if (syncingSelection.current) return;
+      if (syncingSelection) return;
       const item = items.at(-1);
-      if (item) selectRef.current(item);
+      if (item && treePaths.includes(item)) later(() => props.onSelect(fromTree(item)));
     },
     composition: {
       contextMenu: {
@@ -146,9 +122,9 @@ export function BrowserTree({
         onOpen: (item, context) => {
           context.close({ restoreFocus: false });
           if (item.kind === "file")
-            toggleReviewedRef.current(fromTree(item.path));
+            later(() => props.onToggleReviewed(fromTree(item.path)));
           else if (item.kind === "directory")
-            toggleDirectoryRef.current(item.path);
+            later(() => props.onToggleDirectoryReviewed(item.path));
         },
       },
     },
@@ -173,7 +149,7 @@ export function BrowserTree({
       [data-item-type="folder"] > [data-item-section="decoration"] { opacity: 0.55; }
     `,
     renderRowDecoration: ({ row }) => {
-      const stat = statsRef.current.get(
+      const stat = stats().get(
         row.kind === "directory" ? row.path.replace(/\/?$/, "/") : row.path,
       );
       if (!stat) return null;
@@ -186,14 +162,18 @@ export function BrowserTree({
         ],
       };
     },
-    gitStatus: entries.map((entry) => ({
+    gitStatus: untrack(() => props.entries).map((entry) => ({
       path: entry.path,
       status: statuses[entry.status] || "modified",
     })),
   });
-  useEffect(() => {
+  onMount(() => {
+    model.render({ fileTreeContainer: host });
+    onCleanup(() => model.cleanUp());
+  });
+  onMount(() => {
     const updateOrder = () => {
-      onOrderChange(
+      props.onOrderChange(
         model.getVisibleRows(0, model.getVisibleCount())
           .filter((row) => row.kind === "file")
           .map((row) => fromTree(row.path)),
@@ -201,36 +181,36 @@ export function BrowserTree({
     };
     const unsubscribe = model.subscribe(updateOrder);
     updateOrder();
-    return () => {
+    onCleanup(() => {
       unsubscribe();
-      onOrderChange([]);
-    };
-  }, [model, onOrderChange]);
-  useEffect(() => {
+      props.onOrderChange([]);
+    });
+  });
+  onMount(() => {
     const directories = directoryPaths(paths);
-    return model.subscribe(() => {
-      if (searchRef.current && !model.getSearchValue()) {
+    onCleanup(model.subscribe(() => {
+      if (props.search && !model.getSearchValue()) {
         queueMicrotask(() => {
-          if (!searchRef.current || model.getSearchValue()) return;
-          syncingExpansion.current = true;
-          model.setSearch(searchRef.current);
-          syncingExpansion.current = false;
+          if (!props.search || model.getSearchValue()) return;
+          syncingExpansion = true;
+          model.setSearch(props.search);
+          syncingExpansion = false;
         });
         return;
       }
       // Searching temporarily expands matches; it must not overwrite user choices.
-      if (syncingExpansion.current || model.getSearchValue()) return;
+      if (syncingExpansion || model.getSearchValue()) return;
       for (const path of directories) {
         const item = model.getItem(path);
         if (!item || !("isExpanded" in item)) continue;
         const closed = !item.isExpanded();
-        if (closed === collapsedRef.current.includes(path)) continue;
-        collapseRef.current(path, closed);
+        if (closed === props.collapsed.includes(path)) continue;
+        later(() => props.onCollapse(path, closed));
       }
-    });
-  }, [model]);
-  useEffect(() => {
-    syncingExpansion.current = true;
+    }));
+  });
+  createEffect(on([() => props.search, () => props.collapsed], ([search, collapsed]) => {
+    syncingExpansion = true;
     model.setSearch(search);
     if (!search) {
       for (const path of directoryPaths(paths)) {
@@ -240,23 +220,22 @@ export function BrowserTree({
         else item.expand();
       }
     }
-    syncingExpansion.current = false;
-  }, [model, search, collapsed]);
-  useEffect(() => {
+    syncingExpansion = false;
+  }));
+  createEffect(on([() => props.selected, () => props.reveal], ([selected, reveal]) => {
     const treeSelected = toTree(selected);
-    syncingSelection.current = true;
+    syncingSelection = true;
     for (const path of model.getSelectedPaths()) {
       if (path !== treeSelected) model.getItem(path)?.deselect();
     }
     const item = model.getItem(treeSelected);
     if (item && !item.isSelected()) item.select();
-    syncingSelection.current = false;
+    syncingSelection = false;
     if (item && reveal) model.scrollToPath(treeSelected, { offset: "nearest" });
-  }, [model, selected, treePaths, reveal]);
-  useEffect(() => {
+  }));
+  onMount(() => {
     // Pierre renders rows as buttons, with no link renderer. Intercept before
     // its selection handler so opening a tab leaves this tab untouched.
-    let host: HTMLElement | undefined;
     const openTab = (event: MouseEvent) => {
       if (event.type === "auxclick" ? event.button !== 1
         : event.button !== 0 || !(event.metaKey || event.ctrlKey)) return;
@@ -265,23 +244,19 @@ export function BrowserTree({
       if (row?.dataset.itemType !== "file" || !row.dataset.itemPath) return;
       event.preventDefault();
       event.stopPropagation();
-      window.open(hrefRef.current(fromTree(row.dataset.itemPath)), "_blank", "noopener");
+      window.open(props.fileHref(fromTree(row.dataset.itemPath)), "_blank", "noopener");
     };
-    const frame = requestAnimationFrame(() => {
-      host = model.getFileTreeContainer() || undefined;
-      host?.addEventListener("click", openTab, true);
-      host?.addEventListener("auxclick", openTab, true);
+    host.addEventListener("click", openTab, true);
+    host.addEventListener("auxclick", openTab, true);
+    onCleanup(() => {
+      host.removeEventListener("click", openTab, true);
+      host.removeEventListener("auxclick", openTab, true);
     });
-    return () => {
-      cancelAnimationFrame(frame);
-      host?.removeEventListener("click", openTab, true);
-      host?.removeEventListener("auxclick", openTab, true);
-    };
-  }, [model]);
-  useEffect(() => {
+  });
+  createEffect(on([() => props.scrollRoot, () => props.scrollKey], ([scrollRoot, scrollKey]) => {
     let scroller: HTMLElement | null | undefined;
     const frame = requestAnimationFrame(() => {
-      scroller = model.getFileTreeContainer()?.shadowRoot?.querySelector(
+      scroller = host.shadowRoot?.querySelector(
         '[data-file-tree-virtualized-scroll="true"]',
       );
       if (!scroller) return;
@@ -291,18 +266,17 @@ export function BrowserTree({
     const save = () => {
       if (scroller) rememberScroll(scrollRoot, scrollKey, scroller);
     };
-    return () => {
+    onCleanup(() => {
       cancelAnimationFrame(frame);
       save();
       scroller?.removeEventListener("scroll", save);
-    };
-  }, [model, scrollRoot, scrollKey]);
-  useEffect(() => {
+    });
+  }));
+  onMount(() => {
     let observer: MutationObserver | undefined;
     const frame = requestAnimationFrame(() => {
-      const host = model.getFileTreeContainer();
-      const root = host?.shadowRoot;
-      if (!host || !root) return;
+      const root = host.shadowRoot;
+      if (!root) return;
       const label = reviewed ? "Mark unreviewed" : "Mark reviewed";
       const updateAction = () => {
         const message = root.querySelector(
@@ -336,16 +310,16 @@ export function BrowserTree({
       });
       updateAction();
     });
-    return () => {
+    onCleanup(() => {
       cancelAnimationFrame(frame);
       observer?.disconnect();
-    };
-  }, [model, reviewed]);
+    });
+  });
   return (
-    <FileTree
-      model={model}
-      className="file-tree"
-      style={selected ? treeStyle : inactiveTreeStyle}
+    <file-tree-container
+      ref={host}
+      class="file-tree"
+      style={props.selected ? treeStyle as JSX.CSSProperties : inactiveTreeStyle}
     />
   );
 }
