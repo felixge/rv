@@ -12,6 +12,7 @@
   --border: #e3e6ea;
   --muted: #7a818b;
   --blue: #146dc1;
+  --panel-header-height: 47px;
   --diffs-font-family: "IBM Plex Mono", monospace;
   --diffs-font-size: 12px;
   --diffs-line-height: 23px;
@@ -483,7 +484,7 @@ button.panel-toggle:hover {
 }
 .sidebar-header {
   display: flex;
-  height: 47px;
+  height: var(--panel-header-height);
   border-bottom: 1px solid var(--border);
   gap: 7px;
   padding: 0 12px;
@@ -719,9 +720,10 @@ button.panel-toggle:hover {
 .file-heading {
   display: flex;
   flex-wrap: wrap;
+  flex-shrink: 0;
   align-items: center;
   gap: 10px;
-  min-height: 45px;
+  min-height: var(--panel-header-height);
   padding: 8px 19px;
   border-bottom: 1px solid var(--border);
 }
@@ -997,9 +999,10 @@ button.panel-toggle:hover {
 }
 .panel-heading {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  min-height: 47px;
+  min-height: var(--panel-header-height);
   padding: 10px 18px;
   border-bottom: 1px solid var(--border);
   gap: 8px;
