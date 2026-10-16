@@ -1,0 +1,57 @@
+/* Shadow-root styles for the code viewer. Leave room for the comment action
+   between the line numbers and source without covering either. */
+[data-column-number],
+[data-gutter-buffer] {
+  padding-right: calc(1ch + 8px);
+}
+[data-line],
+[data-no-newline] {
+  padding-left: calc(1ch + 12px);
+}
+[data-indicators="classic"] [data-line],
+[data-indicators="classic"] [data-no-newline] {
+  padding-left: calc(2ch + 12px);
+}
+[data-gutter-utility-slot] {
+  z-index: 5;
+}
+[data-utility-button] {
+  width: 22px;
+  height: 22px;
+  margin-top: 0.5px;
+  margin-right: -11px;
+  border-radius: 5px;
+  background: #1f6feb;
+  color: #fff;
+  box-shadow: 0 0 0 1px #1a5fc9;
+  transition: none;
+  animation: none;
+}
+[data-utility-button]:hover {
+  background: #1f6feb;
+}
+[data-utility-button]:focus-visible {
+  outline: 2px solid #80bfff;
+  outline-offset: 2px;
+}
+[data-utility-button] svg {
+  width: 16px;
+  height: 16px;
+}
+/* The utility follows the bottom endpoint while dragging a range. */
+[data-column-number][data-selected-line]:not([data-selected-line="single"])::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -1px;
+  width: 2px;
+  background: #1f6feb;
+  pointer-events: none;
+}
+[data-column-number][data-selected-line="first"]::after {
+  top: 11.5px;
+}
+[data-column-number][data-selected-line="last"]::after {
+  bottom: calc(100% - 11.5px);
+}
