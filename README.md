@@ -17,7 +17,7 @@ There are many tools like this, but this one is customized to my preferences.
 - Shows every changed file in one scroll and tracks which ones you have
   reviewed.
 - Copies every comment as a concise prompt with exact file and line
-  references, or hands it straight to a coding agent.
+  references.
 - Is fast and keyboard-driven: file finder, search across files, and a command
   launcher for everything else.
 - Runs entirely on your machine: no account, database, telemetry, or
@@ -139,29 +139,6 @@ rv --range main..HEAD     # a commit range
 full hash). The three options are mutually exclusive.
 
 Use `rv --help` for directory, port, host, and browser options.
-
-### Agent integration
-
-Start rv in agent mode to send review prompts directly to a coding agent:
-
-```sh
-rv --agent
-```
-
-The review UI shows **Submit to Agent** instead of **Copy Prompt**. Submission
-clears the comments after the prompt is accepted, while leaving rv open for
-another review. The agent receives one submitted prompt by running:
-
-```console
-$ rv --wait
-src/shipping.ts:6
-Keep the threshold at 100 € for now.
-```
-
-`rv --wait` prints the prompt to stdout and exits. Run it again to wait for the
-next submission. Prompts submitted between calls are queued by the running rv
-process. Coding agents can run `rv --skill` for a short description of this
-workflow.
 
 ## Development
 

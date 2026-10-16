@@ -3,21 +3,13 @@ import { Modal } from "../components/Modal";
 
 export function PromptDialog({
   prompt,
-  agent,
   copyLabel,
-  sendLabel,
-  submitting,
   onCopy,
-  onSend,
   onClose,
 }: {
   prompt: string;
-  agent: boolean;
   copyLabel: string;
-  sendLabel: string;
-  submitting: boolean;
   onCopy: () => void;
-  onSend: () => void;
   onClose: () => void;
 }) {
   return (
@@ -30,13 +22,10 @@ export function PromptDialog({
       </div>
       <PromptText label="Prompt text" prompt={prompt} />
       <div className="dialog-footer">
-        <span>Exactly what gets {agent ? "submitted" : "copied"}.</span>
-        <div className="dialog-actions">
-          {agent && <button onClick={onCopy}>{copyLabel}</button>}
-          <button className="primary" disabled={submitting} onClick={onSend}>
-            {sendLabel}
-          </button>
-        </div>
+        <span>Exactly what gets copied.</span>
+        <button className="primary" onClick={onCopy}>
+          {copyLabel}
+        </button>
       </div>
     </Modal>
   );

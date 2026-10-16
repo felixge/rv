@@ -39,12 +39,5 @@ export function useSavedState(initial: SavedState, next: SavedState) {
     window.addEventListener("pagehide", flushOnHide);
     return () => window.removeEventListener("pagehide", flushOnHide);
   }, []);
-
-  // Write a section immediately, ahead of the debounced save.
-  const saveNow = (patch: SavedState) => {
-    pending.current = { ...pending.current, ...patch };
-    dirty.current = true;
-    flush();
-  };
-  return { error, saveNow };
+  return error;
 }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -41,52 +41,25 @@ export function statePath(root) {
   return path.join(stateDir(root), "state.json");
 }
 
-function agentSessionPath(root) {
-  return path.join(stateDir(root), "agent.json");
-}
-
-async function readCacheFile(file, root) {
+export async function loadState(root) {
   try {
-    const data = JSON.parse(await readFile(file, "utf8"));
+    const data = JSON.parse(await readFile(statePath(root), "utf8"));
     // Path encoding is lossy (/a/b-c and /a/b/c encode the same), so a
     // mismatched root means the file belongs to another repository.
     if (data?.version !== VERSION || data.root !== root) return null;
-    // version/root describe the cache file, not the data it holds.
-    const { version, root: _, ...rest } = data;
-    return rest;
+    // version/root describe the cache file, not the state it holds.
+    const { version, root: _, ...state } = data;
+    return state;
   } catch {
     return null;
   }
 }
 
-async function writeCacheFile(file, root, data) {
+export async function saveState(root, state) {
+  const file = statePath(root);
   await mkdir(path.dirname(file), { recursive: true });
   // Atomic write: a crash or concurrent reader never sees a half-written file.
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify({ version: VERSION, root, ...data }));
+  await writeFile(tmp, JSON.stringify({ version: VERSION, root, ...state }));
   await rename(tmp, file);
-}
-
-export function loadState(root) {
-  return readCacheFile(statePath(root), root);
-}
-
-export function saveState(root, state) {
-  return writeCacheFile(statePath(root), root, state);
-}
-
-export function loadAgentSession(root) {
-  return readCacheFile(agentSessionPath(root), root);
-}
-
-export function saveAgentSession(root, session) {
-  return writeCacheFile(agentSessionPath(root), root, session);
-}
-
-export async function clearAgentSession(root, token) {
-  // The readable directory encoding is lossy. Never remove a colliding
-  // repository's live-session descriptor. Cleanup is best-effort; stale
-  // descriptors are rejected by the status check before the next session.
-  if ((await loadAgentSession(root))?.token === token)
-    await rm(agentSessionPath(root), { force: true }).catch(() => {});
 }

@@ -2,26 +2,11 @@
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { randomBytes } from "node:crypto";
 import { repository } from "../server/repository.js";
-import { createAgentChannel, createApp } from "../server/http.js";
-import {
-  clearAgentSession,
-  loadAgentSession,
-  saveAgentSession,
-} from "../server/state.js";
-
-const agentSkill = `Use rv to collect review feedback from the user:
-1. Start "rv --agent" as a long-running process and keep it alive.
-2. Run "rv --wait". It blocks until the user submits the review, then prints the exact prompt to stdout and exits.
-3. Apply the submitted feedback, then run "rv --wait" again for the next review round.
-
-The browser UI stays open between rounds. A successful submission clears its comments, and submissions made between wait calls remain queued.`;
+import { createApp } from "../server/http.js";
 
 const usage = `Usage: rv [directory] [--working | --commit <ref> | --range <from>..<to>]
-       [--agent] [--port 4444] [--no-open]
-       rv [directory] --wait
-       rv --skill
+       [--port 4444] [--no-open]
 
 Review the current repository in your browser. Refresh the page to see new changes.
 If the default port 4444 is busy, a free port is picked automatically.
@@ -30,44 +15,7 @@ If the default port 4444 is busy, a free port is picked automatically.
 Open on a specific review view:
   --working             Uncommitted changes
   --commit <ref>        A single commit, e.g. --commit HEAD
-  --range <from>..<to>  A commit range, e.g. --range main..HEAD
-
-Agent integration:
-  --agent               Enable submitting review prompts to an agent
-  --wait                Wait for the next submitted prompt and print it
-  --skill               Print instructions for coding agents`;
-
-async function sessionIsActive(session) {
-  try {
-    const response = await fetch(`${session.url}/api/agent/status`, {
-      headers: { "X-Rv": "1", "X-Rv-Agent": session.token },
-      signal: AbortSignal.timeout(500),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForSubmission(root) {
-  const session = await loadAgentSession(root);
-  if (!session || !(await sessionIsActive(session)))
-    throw new Error("No active agent session. Start rv --agent first.");
-  const response = await fetch(`${session.url}/api/agent/wait`, {
-    headers: { "X-Rv": "1", "X-Rv-Agent": session.token },
-  });
-  if (!response.ok) {
-    let message = `Agent session returned HTTP ${response.status}.`;
-    try {
-      message = (await response.json()).error || message;
-    } catch {}
-    throw new Error(message);
-  }
-  const prompt = await response.text();
-  await new Promise((resolve, reject) =>
-    process.stdout.write(`${prompt}\n`, (error) => error ? reject(error) : resolve()),
-  );
-}
+  --range <from>..<to>  A commit range, e.g. --range main..HEAD`;
 
 // Resolves once listening; rejects with the server's error (e.g. EADDRINUSE).
 function listen(server, options) {
@@ -85,16 +33,11 @@ try {
       working: { type: "boolean" },
       commit: { type: "string" },
       range: { type: "string" },
-      agent: { type: "boolean" },
-      wait: { type: "boolean" },
-      skill: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
   if (values.help) {
     console.log(usage);
-  } else if (values.skill) {
-    console.log(agentSkill);
   } else {
     if (positionals.length > 1)
       throw new Error("Expected at most one directory.");
@@ -105,13 +48,6 @@ try {
     ].filter(Boolean);
     if (views.length > 1)
       throw new Error("Use only one of --working, --commit or --range.");
-    if (values.wait && (values.agent || views.length))
-      throw new Error("--wait cannot be combined with --agent or a review view.");
-    const repo = await repository(positionals[0] || process.cwd());
-    if (values.wait) {
-      await waitForSubmission(repo.root);
-      process.exit(0);
-    }
     let view = "";
     if (values.working) {
       view = "?mode=working";
@@ -130,14 +66,9 @@ try {
     )
       throw new Error("Invalid port.");
     const port = explicitPort ?? 4444;
-    const existing = values.agent && await loadAgentSession(repo.root);
-    if (existing && await sessionIsActive(existing))
-      throw new Error("An agent session is already running for this repository.");
-    const token = values.agent ? randomBytes(32).toString("hex") : null;
-    const agent = token ? createAgentChannel(token) : null;
+    const repo = await repository(positionals[0] || process.cwd());
     const server = createApp(repo, {
       allowRemote: values.host !== "127.0.0.1" && values.host !== "localhost",
-      agent,
     });
     try {
       await listen(server, { port, host: values.host });
@@ -145,20 +76,8 @@ try {
       if (error.code !== "EADDRINUSE" || explicitPort !== null) throw error;
       await listen(server, { port: 0, host: values.host });
     }
-    const baseURL = `http://localhost:${server.address().port}`;
-    if (agent) {
-      try {
-        await saveAgentSession(repo.root, { url: baseURL, token: agent.token });
-      } catch (error) {
-        server.close();
-        throw error;
-      }
-    }
     server.on("error", (error) => console.error(`rv: ${error.message}`));
-    server.on("close", () => {
-      if (agent) void clearAgentSession(repo.root, agent.token);
-    });
-    const url = `${baseURL}${view}`;
+    const url = `http://localhost:${server.address().port}${view}`;
     console.log(
       `\n  rv → ${url}\n  ${repo.root}\n\n  Refresh the page to update. Ctrl+C to stop.\n`,
     );
@@ -175,10 +94,7 @@ try {
       );
     }
     for (const signal of ["SIGINT", "SIGTERM"])
-      process.on(signal, () => {
-        agent?.close();
-        server.close();
-      });
+      process.on(signal, () => server.close());
   }
 } catch (error) {
   console.error(

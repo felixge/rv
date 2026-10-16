@@ -21,7 +21,6 @@ export function CommentsPanel({
   newComment,
   selecting,
   errors,
-  agent,
   onPreview,
   onHide,
   onResize,
@@ -45,7 +44,6 @@ export function CommentsPanel({
   newComment: { reference: string; oldSide: boolean } | null;
   selecting: boolean;
   errors: string[];
-  agent: boolean;
   onPreview: () => void;
   onHide: () => void;
   onResize: (width: number) => void;
@@ -113,7 +111,7 @@ export function CommentsPanel({
             <h3>Your thoughts, ready for an agent.</h3>
             <p>
               Select a line in the code to add a comment. Collect your
-              feedback here, then {agent ? "submit" : "copy"} it as one prompt.
+              feedback here, then copy it as one prompt.
             </p>
           </div>
         )}

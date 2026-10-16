@@ -102,9 +102,6 @@ export function Review({
   const [editing, setEditing] = useState<string>();
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [submitError, setSubmitError] = useState("");
   const [dialog, setDialog] =
     useState<"commands" | "finder" | "line" | "prompt" | "copied" | null>(null);
   const closeDialog = () => setDialog(null);
@@ -186,7 +183,7 @@ export function Review({
     return () => window.removeEventListener("popstate", restoreURL);
   }, []);
 
-  const { error: storageError, saveNow } = useSavedState(state, {
+  const storageError = useSavedState(state, {
     view: { search, wrap, showFiles, showComments, filesWidth, commentsWidth, collapsed },
     // Mutable views are only reviewed for this page snapshot.
     reviewed: Object.fromEntries(
@@ -724,7 +721,6 @@ export function Review({
 
   function saveComment() {
     if (!draft.trim()) return;
-    setSubmitted(false);
     if (editing) {
       setComments((items) =>
         items.map((item) =>
@@ -754,7 +750,6 @@ export function Review({
 
   function saveGeneralComment() {
     if (!generalDraft.trim()) return;
-    setSubmitted(false);
     setComments((items) => [...items, {
       id: crypto.randomUUID(),
       path: "",
@@ -783,35 +778,7 @@ export function Review({
     }
   }
 
-  async function submitPrompt() {
-    if (!prompt || submitting) return;
-    setSubmitting(true);
-    setSubmitError("");
-    try {
-      const response = await fetch("/api/agent/submit", {
-        method: "POST",
-        headers: { "X-Rv": "1", "Content-Type": "text/plain" },
-        body: prompt,
-      });
-      if (!response.ok) throw new Error((await response.json()).error);
-      setComments([]);
-      cancelComment();
-      setGeneralDraft("");
-      setHighlight(null);
-      closeDialog();
-      setCopied(false);
-      setSubmitted(true);
-      saveNow({ comments: [] });
-    } catch (error) {
-      setSubmitError((error as Error).message || "Could not submit the prompt.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const sendPrompt = info.agent ? submitPrompt : copyPrompt;
   const copyLabel = copied ? "✓ Copied" : "Copy Prompt";
-  const sendLabel = !info.agent ? copyLabel : submitting ? "Submitting…" : "Submit to Agent";
 
   function changeTab(value: "files" | "changes", refresh = true) {
     if (refresh) {
@@ -1152,10 +1119,10 @@ export function Review({
           </button>
           <button
             className="primary copy"
-            disabled={!comments.length || submitting}
-            onClick={sendPrompt}
+            disabled={!comments.length}
+            onClick={copyPrompt}
           >
-            {info.agent && submitted && !submitting ? "✓ Submitted" : sendLabel}
+            {copyLabel}
             <span className="count">{comments.length}</span>
           </button>
         </div>
@@ -1356,8 +1323,7 @@ export function Review({
             oldSide: range.side === "deletions",
           } : null}
           selecting={!!range}
-          errors={[copyError, submitError, storageError]}
-          agent={info.agent}
+          errors={[copyError, storageError]}
           onPreview={() => setDialog("prompt")}
           onHide={() => setShowComments(false)}
           onResize={setCommentsWidth}
@@ -1389,12 +1355,8 @@ export function Review({
       {dialog === "prompt" && (
         <PromptDialog
           prompt={prompt}
-          agent={info.agent}
           copyLabel={copyLabel}
-          sendLabel={sendLabel}
-          submitting={submitting}
           onCopy={copyPrompt}
-          onSend={sendPrompt}
           onClose={closeDialog}
         />
       )}

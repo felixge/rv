@@ -19,7 +19,6 @@ export type Info = {
   root: string;
   name: string;
   isGit: boolean;
-  agent: boolean;
   branch: string;
   files: string[];
   lineCounts: Record<string, number | null>;
