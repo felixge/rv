@@ -1126,6 +1126,7 @@ export function Review(props: {
           from={from()}
           to={to()}
           commits={info().commits}
+          upstream={info().upstream}
           isGit={info().isGit}
           comparing={comparing()}
           onFiles={() => changeTab("files")}

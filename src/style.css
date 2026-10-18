@@ -249,6 +249,56 @@ code {
   font-size: 10px;
   text-align: right;
 }
+/* Pushed state: a commit rail whose nodes are a laptop (only on this machine)
+   or a globe (on the remote). The rail is dashed amber until pushed. */
+.review-options > button > span.push-rail {
+  position: relative;
+  flex: 0 0 15px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin: -7px 0;
+  background: inherit;
+}
+.push-rail {
+  color: #a7b0bb;
+}
+.push-rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  border-left: 1.5px solid #c3cad3;
+}
+.unpushed .push-rail {
+  color: #c98a07;
+}
+.unpushed .push-rail::before {
+  border-left-style: dashed;
+  border-left-color: #e3a72f;
+}
+/* The icon masks the rail behind it. */
+.push-rail svg {
+  position: relative;
+  padding: 1px 0;
+  background: inherit;
+}
+.review-options h2 + .commit .push-rail::before {
+  top: 50%;
+}
+.review-options .commit:not(:has(+ .commit)) .push-rail::before {
+  bottom: 50%;
+}
+.review-options > button > span.remote-ref {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e9eef4;
+  color: #4d5866;
+  font-family: var(--diffs-font-family);
+  font-size: 10px;
+}
 .review-options > p {
   margin: 0;
   padding: 25px 10px;

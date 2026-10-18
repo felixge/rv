@@ -11,6 +11,7 @@ export function ReviewPalette(props: {
   from: string;
   to: string;
   commits: Info["commits"];
+  upstream: string;
   isGit: boolean;
   comparing: boolean;
   onFiles: () => void;
@@ -38,6 +39,8 @@ export function ReviewPalette(props: {
   };
   const matches = (value: string) => value.toLowerCase().includes(query().trim().toLowerCase());
   const choices = () => props.commits.filter((commit) => matches(`${commit.id} ${commit.subject}`));
+  // The newest pushed commit is where the remote branch points.
+  const remoteTip = () => props.commits.find((commit) => commit.pushed)?.id;
   const scopes = () => [
     {
       title: "File Browser",
@@ -162,15 +165,50 @@ export function ReviewPalette(props: {
                       const selected = () => props.tab === "changes" &&
                         props.comparison.mode === "commit" &&
                         props.comparison.target === commit.id;
+                      const state = commit.pushed ? "Pushed" : "Not pushed";
                       return (
                         <button
                           type="button"
                           role="option"
                           aria-selected={selected()}
+                          classList={{ commit: true, unpushed: commit.pushed === false }}
+                          title={commit.pushed === undefined ? undefined : `${state} to ${props.upstream}`}
                           onClick={() => choose(() => props.onCommit(commit.id))}
                         >
                           <span class="option-check">{selected() ? "✓" : ""}</span>
+                          <Show when={commit.pushed !== undefined}>
+                            <span class="push-rail" role="img" aria-label={state}>
+                              <svg
+                                viewBox="0 0 16 16"
+                                width="15"
+                                height="15"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.4"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                              >
+                                {commit.pushed ? (
+                                  // Globe: on the remote.
+                                  <>
+                                    <circle cx="8" cy="8" r="6" />
+                                    <ellipse cx="8" cy="8" rx="2.5" ry="6" />
+                                    <path d="M2 8h12" />
+                                  </>
+                                ) : (
+                                  // Laptop: only on this machine.
+                                  <>
+                                    <rect x="3.5" y="4" width="9" height="6.5" rx="1" />
+                                    <path d="M2 12.5h12" />
+                                  </>
+                                )}
+                              </svg>
+                            </span>
+                          </Show>
                           <span class="commit-subject">{commit.subject}</span>
+                          <Show when={commit.id === remoteTip()}>
+                            <span class="remote-ref">{props.upstream}</span>
+                          </Show>
                           <code>{commit.short}</code>
                           <time datetime={commit.date} title={commit.date.replace("T", " ")}>{commitAge(commit.date)}</time>
                         </button>

@@ -250,6 +250,18 @@ export async function repository(directory) {
             return { id, short, subject, author, date };
           })
       : [];
+    // A commit counts as pushed once any remote-tracking ref contains it.
+    // Without remotes there is nothing to push to, so commits carry no state.
+    let upstream = "";
+    if (commits.length && (await git("remote")).trim()) {
+      const unpushed = new Set(
+        (await git("rev-list", "HEAD", "--not", "--remotes")).split("\n"),
+      );
+      for (const commit of commits) commit.pushed = !unpushed.has(commit.id);
+      upstream = await git("rev-parse", "--abbrev-ref", "@{upstream}")
+        .then((name) => name.trim())
+        .catch(() => "remote");
+    }
     let branch = "";
     if (isGit) {
       try {
@@ -278,6 +290,7 @@ export async function repository(directory) {
       isGit,
       branch,
       commits,
+      upstream,
       files: fileList,
       lineCounts,
       working: await compare(),

@@ -334,6 +334,26 @@ test("prompt contains only exact file:line references and associated comments", 
   assert.equal(formatPrompt([]), "");
 });
 
+test("commits know whether a remote has them", async (t) => {
+  const f = await fixture();
+  t.after(f.cleanup);
+  const repo = await repository(f.root);
+  // Without remotes there is nothing to push to.
+  let info = await repo.info();
+  assert.equal(info.upstream, "");
+  assert.ok(info.commits.every((commit) => !("pushed" in commit)));
+  const remote = await mkdtemp(path.join(tmpdir(), "rv-remote-"));
+  t.after(() => rm(remote, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "--bare", remote]);
+  f.git("remote", "add", "origin", remote);
+  f.git("push", "-q", "origin", `${f.second}:refs/heads/main`);
+  info = await repo.info();
+  assert.deepEqual(info.commits.map((commit) => commit.pushed), [false, true, true]);
+  assert.equal(info.upstream, "remote"); // pushed, but no upstream branch set
+  f.git("branch", "-q", "-u", "origin/main");
+  assert.equal((await repo.info()).upstream, "origin/main");
+});
+
 test("ordinary folders and brand-new Git repositories with zero objects work", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "rv-empty-"));
   t.after(() => rm(root, { recursive: true, force: true }));
