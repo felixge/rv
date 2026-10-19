@@ -29,6 +29,7 @@ export function FileHeading(props: {
   reviewed: boolean;
   reviewDisabled: boolean;
   onToggleReviewed: () => void;
+  onComment: () => void;
 }) {
   return (
     <div class="file-heading">
@@ -99,11 +100,16 @@ export function FileHeading(props: {
         </button>
       </div>
       <Show when={props.path && !props.summary}>
-        <ReviewToggle
-          reviewed={props.reviewed}
-          disabled={props.reviewDisabled}
-          onToggle={props.onToggleReviewed}
-        />
+        <div class="file-actions">
+          <Show when={!props.title}>
+            <FileCommentButton path={props.path} disabled={props.reviewDisabled} onClick={props.onComment} />
+          </Show>
+          <ReviewToggle
+            reviewed={props.reviewed}
+            disabled={props.reviewDisabled}
+            onToggle={props.onToggleReviewed}
+          />
+        </div>
       </Show>
     </div>
   );
@@ -123,6 +129,7 @@ export function DiffFileHeader(props: {
   reviewDisabled: boolean;
   onSelect: () => void;
   onToggleReviewed: () => void;
+  onComment: () => void;
 }) {
   return (
     <div
@@ -147,12 +154,35 @@ export function DiffFileHeader(props: {
       <Show when={props.notice}>
         <span class="file-notice">{props.notice}</span>
       </Show>
-      <ReviewToggle
-        reviewed={props.reviewed}
-        disabled={props.reviewDisabled}
-        onToggle={props.onToggleReviewed}
-      />
+      <div class="file-actions">
+        <Show when={!props.title}>
+          <FileCommentButton path={props.path} disabled={props.reviewDisabled} onClick={props.onComment} />
+        </Show>
+        <ReviewToggle
+          reviewed={props.reviewed}
+          disabled={props.reviewDisabled}
+          onToggle={props.onToggleReviewed}
+        />
+      </div>
     </div>
+  );
+}
+
+function FileCommentButton(props: {
+  path: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      class="file-comment"
+      aria-label={`Comment on file ${props.path}`}
+      title="Comment on the whole file"
+      disabled={props.disabled}
+      onClick={() => props.onClick()}
+    >
+      Comment
+    </button>
   );
 }
 

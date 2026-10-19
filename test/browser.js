@@ -1839,7 +1839,7 @@ try {
   );
   assert.equal(
     await evaluate(
-      `${heading}.lastElementChild.classList.contains('review-toggle')`,
+      `${heading}.lastElementChild.matches('.file-actions') && ${heading}.lastElementChild.lastElementChild.classList.contains('review-toggle')`,
     ),
     true,
   );

@@ -118,6 +118,7 @@ export function Review(props: {
   // The file the line range belongs to; in the all-files diff it may differ
   // from the selected file.
   const [rangePath, setRangePath] = createSignal("");
+  const [fileCommentPath, setFileCommentPath] = createSignal("");
   const [draft, setDraft] = createSignal("");
   const [generalDraft, setGeneralDraft] = createSignal("");
   const [editing, setEditing] = createSignal<string>();
@@ -138,11 +139,13 @@ export function Review(props: {
     setEditing(undefined);
     setRange(null);
     setLinePreview(undefined);
+    setFileCommentPath("");
     setDraft("");
   });
   const clearSelection = batched(() => {
     setRange(null);
     setLinePreview(undefined);
+    setFileCommentPath("");
     setHighlight(null);
     setPendingComment(null);
   });
@@ -424,7 +427,10 @@ export function Review(props: {
   const onSelection = batched((value: SelectedLineRange | null, path?: string) => {
     const side = singleSide();
     setHighlight(null);
-    if (value) setShowComments(true);
+    if (value) {
+      setShowComments(true);
+      setFileCommentPath("");
+    }
     if (value && path) setRangePath(path);
     // A reference must use one file-side's coordinates, never mixed old/new numbers.
     setRange(
@@ -439,6 +445,17 @@ export function Review(props: {
     if (editing()) setDraft("");
     setEditing(undefined);
     onSelection(value, path);
+    requestAnimationFrame(() => {
+      document.getElementById("comment-text")?.focus({ preventScroll: true });
+    });
+  });
+  const openFileComment = batched((path: string) => {
+    if (editing()) setDraft("");
+    setEditing(undefined);
+    clearSelection();
+    setSelected(path);
+    setFileCommentPath(path);
+    setShowComments(true);
     requestAnimationFrame(() => {
       document.getElementById("comment-text")?.focus({ preventScroll: true });
     });
@@ -509,7 +526,7 @@ export function Review(props: {
   }
   function matchesView(comment: Comment) {
     return (diffAll() || comment.path === selected()) && matchesScope(comment) &&
-      (!singleSide() || (comment.side || "additions") === singleSide());
+      (comment.file || !singleSide() || (comment.side || "additions") === singleSide());
   }
   function commentRange(comment: Comment): SelectedLineRange {
     return {
@@ -530,7 +547,7 @@ export function Review(props: {
   }
   const diffKey = (path: string) => JSON.stringify([allKey(), path]);
   const annotationsFor = (path: string) => comments()
-    .filter((comment) => comment.path === path && matchesView(comment))
+    .filter((comment) => !comment.file && comment.path === path && matchesView(comment))
     .map((comment) => ({
       lineNumber: comment.end,
       side: comment.side || "additions",
@@ -593,7 +610,9 @@ export function Review(props: {
   const items = () => (diffAll() ? allItems() : fileItems()) as CodeViewItem<Comment>[];
   const highlightedRange = () => {
     const comment = highlight();
-    return comment && matchesView(comment) ? commentRange(comment) : range();
+    return comment && matchesView(comment)
+      ? comment.file ? null : commentRange(comment)
+      : range();
   };
   const highlightedPath = () => {
     const comment = highlight();
@@ -735,7 +754,11 @@ export function Review(props: {
         return;
       skipScrollRestore();
       scrollIntent = false;
-      instance.scrollTo({
+      instance.scrollTo(comment.file ? {
+        type: "item",
+        id: comment.path,
+        align: "start",
+      } : {
         type: "range",
         id: comment.path,
         range: commentRange(comment),
@@ -750,9 +773,11 @@ export function Review(props: {
     const opened = batch(() => {
       setComparing(false);
       setRange(null);
+      setLinePreview(undefined);
+      setFileCommentPath("");
       setHighlight(comment);
       setError("");
-      if (viewerMode() !== "diff" && comment.comparison && !comment.commit)
+      if (viewerMode() !== "diff" && comment.comparison && !comment.commit && !comment.file)
         setViewerMode(comment.side === "deletions" ? "old" : "new");
       if (matchesView(comment) || matchesScope(comment)) {
         setSelected(comment.path);
@@ -822,15 +847,16 @@ export function Review(props: {
       );
     } else {
       const value = range();
-      const path = rangePath();
-      if (!value || !path) return;
+      const filePath = fileCommentPath();
+      const path = filePath || rangePath();
+      if (!filePath && (!value || !path)) return;
       const comment: Comment = {
         id: crypto.randomUUID(),
         path,
-        start: start(),
-        end: end(),
+        start: filePath ? 0 : start(),
+        end: filePath ? 0 : end(),
         text: draft().trim(),
-        side: value.side,
+        ...(filePath ? { file: true } : { side: value?.side }),
         context: tab() === "files" ? "File" : compareLabel(),
         ...(tab() === "changes" ? {
           comparison: {
@@ -1083,7 +1109,7 @@ export function Review(props: {
         find.close();
         focusViewer();
       } else if (dialog()) closeDialog();
-      else if (editing() || range()) cancelComment();
+      else if (editing() || range() || fileCommentPath()) cancelComment();
       else return false;
       return true;
     }),
@@ -1120,6 +1146,7 @@ export function Review(props: {
           reviewDisabled={loading() || comparing()}
           onSelect={() => select(item.id)}
           onToggleReviewed={() => togglePathReviewed(item.id, item.id === selected())}
+          onComment={() => openFileComment(item.id)}
         />
       ) : undefined}
       renderAnnotation={({ metadata: comment }) => (
@@ -1301,6 +1328,7 @@ export function Review(props: {
             reviewed={selectedReviewed()}
             reviewDisabled={loading() || comparing()}
             onToggleReviewed={toggleReviewed}
+            onComment={() => openFileComment(selected())}
           />
           <Show when={error()}>
             <div role="alert" class="error">
@@ -1410,6 +1438,7 @@ export function Review(props: {
           onEdit={batched((comment: Comment) => {
             setEditing(comment.id);
             setRange(null);
+            setFileCommentPath("");
             setDraft(comment.text);
           })}
           onDelete={batched((comment: Comment) => {
@@ -1422,7 +1451,11 @@ export function Review(props: {
           generalDraft={generalDraft()}
           onGeneralDraftChange={setGeneralDraft}
           onSaveGeneral={saveGeneralComment}
-          newComment={!editing() && range() && rangePath() ? {
+          newComment={editing() ? null : fileCommentPath() ? {
+            reference: fileCommentPath(),
+            file: true,
+            oldSide: false,
+          } : range() && rangePath() ? {
             reference: reference({
               path: rangePath(),
               start: start(),
@@ -1431,7 +1464,7 @@ export function Review(props: {
             }),
             oldSide: range()!.side === "deletions",
           } : null}
-          selecting={!!range()}
+          selecting={!!range() || !!fileCommentPath()}
           errors={[copyError(), storageError()]}
           onPreview={() => setDialog("prompt")}
           onHide={() => setShowComments(false)}

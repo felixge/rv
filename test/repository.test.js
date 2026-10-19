@@ -304,7 +304,7 @@ test("built assets are compressed and immutable, but HTML, API data and errors a
   }
 });
 
-test("prompt contains only exact file:line references and associated comments", () => {
+test("prompt contains exact file, line and commit references with their comments", () => {
   assert.equal(
     formatPrompt([
       { path: "src/a.ts", start: 7, end: 7, text: " Check the boundary. " },
@@ -325,11 +325,19 @@ test("prompt contains only exact file:line references and associated comments", 
         context: "not exported",
       },
       {
+        path: "src/whole file.ts",
+        file: true,
+        start: 0,
+        end: 0,
+        text: " Review the module's structure. ",
+        context: "not exported",
+      },
+      {
         general: true,
         text: "Run the full test suite before handing this back.",
       },
     ]),
-    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nRun the full test suite before handing this back.",
+    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nsrc/whole file.ts\nReview the module's structure.\n\nRun the full test suite before handing this back.",
   );
   assert.equal(formatPrompt([]), "");
 });

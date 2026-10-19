@@ -1,5 +1,6 @@
 export function reference(comment) {
   if (comment.general) return "General comment";
+  if (comment.file) return comment.path;
   const path = comment.commit
     ? `commit:${comment.commit}:message`
     : comment.path;

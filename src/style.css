@@ -786,9 +786,14 @@ button.panel-toggle:hover {
   margin-left: 0;
   font-size: 10px;
 }
-.review-toggle {
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
   flex-shrink: 0;
+}
+.file-actions button {
   font-size: 11px;
 }
 /* Reviewed is lavender, not green: green marks added code in diffs. */
@@ -835,7 +840,7 @@ button.panel-toggle:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.view-controls + .review-toggle {
+.view-controls + .file-actions {
   margin-left: 0;
 }
 .view-controls {

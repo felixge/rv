@@ -13,7 +13,7 @@ import path from "node:path";
 //
 // Cache files are never migrated. Bump VERSION whenever their format changes;
 // files from other versions are ignored, so rv starts from scratch.
-const VERSION = 2;
+const VERSION = 3;
 
 function cacheDir() {
   if (process.platform === "darwin")

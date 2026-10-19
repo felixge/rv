@@ -33,6 +33,8 @@ export type Comment = {
   end: number;
   text: string;
   general?: boolean;
+  // Whole-file comments have no line or side; start/end are zero.
+  file?: boolean;
   side?: "additions" | "deletions";
   context: string;
   // Absent for comments on repository files.

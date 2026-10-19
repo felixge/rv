@@ -45,12 +45,13 @@ or with <kbd>R</kbd>; <kbd>U</kbd> undoes it.
 
 ![Marking files reviewed moves them to the Reviewed section](docs/screenshots/reviewed.gif)
 
-### Comment on lines and ranges
+### Comment on files, lines and ranges
 
-Click a line number to comment on it, or drag or Shift-click to select a range.
-<kbd>L</kbd> does the same from the keyboard. Comments work on either side of a
-diff, show up inline and in the comments panel, and can be edited by clicking
-their text. General comments cover feedback that isn't tied to a file.
+Click **Comment** in a file header for feedback on the whole file. Hover a line
+and click **+** for a line comment, or drag **+** to select a range. Line-number
+clicks, Shift-click and <kbd>L</kbd> work too. Line comments work on either side
+of a diff and appear inline and in the comments panel. Click a comment's text to
+edit it. General comments cover feedback that isn't tied to a file.
 
 ![Commenting on a line and a range, then editing a comment](docs/screenshots/comment.gif)
 
