@@ -560,7 +560,7 @@ button.panel-toggle:hover {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  margin: 12px 12px 0;
+  margin: 12px;
   gap: 4px;
 }
 .search {
