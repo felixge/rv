@@ -1,5 +1,10 @@
-/* Shadow-root styles for the code viewer. Leave room for the comment action
-   between the line numbers and source without covering either. */
+/* Keep sticky headers on their own layer to avoid scroll-time seams. */
+[data-diffs-header][data-sticky] {
+  transform: translateZ(0);
+}
+
+/* Leave room for the comment action between the line numbers and source
+   without covering either. */
 [data-column-number],
 [data-gutter-buffer] {
   padding-right: calc(1ch + 8px);
