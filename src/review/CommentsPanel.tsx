@@ -21,7 +21,6 @@ export function CommentsPanel(props: {
   onSaveGeneral: () => void;
   // The composer for a new comment on a file or selected lines.
   newComment: { reference: string; file?: boolean; oldSide: boolean } | null;
-  selecting: boolean;
   errors: string[];
   onPreview: () => void;
   onHide: () => void;
@@ -84,16 +83,6 @@ export function CommentsPanel(props: {
         <For each={props.errors.filter(Boolean)}>
           {(message) => <p role="alert" class="error">{message}</p>}
         </For>
-        <Show when={!props.comments.length && !props.selecting}>
-          <div class="comment-empty">
-            <span class="comment-icon">▤</span>
-            <h3>Your thoughts, ready for an agent.</h3>
-            <p>
-              Select a line in the code to add a comment. Collect your
-              feedback here, then copy it as one prompt.
-            </p>
-          </div>
-        </Show>
         <For each={props.comments}>
           {(comment, index) => (
             <article

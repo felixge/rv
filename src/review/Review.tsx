@@ -1464,7 +1464,6 @@ export function Review(props: {
             }),
             oldSide: range()!.side === "deletions",
           } : null}
-          selecting={!!range() || !!fileCommentPath()}
           errors={[copyError(), storageError()]}
           onPreview={() => setDialog("prompt")}
           onHide={() => setShowComments(false)}

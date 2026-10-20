@@ -1061,24 +1061,6 @@ button.panel-toggle:hover {
   box-shadow: 0 0 0 3px #eaf2fc;
   outline: none;
 }
-.comment-empty {
-  margin: 33px 8px;
-}
-.comment-icon {
-  font-size: 25px;
-  color: #afbac8;
-}
-.comment-empty h3 {
-  font-size: 13px;
-  font-weight: 500;
-  margin-top: 17px;
-  color: #647183;
-}
-.comment-empty p {
-  font-size: 12px;
-  line-height: 1.85;
-  color: #97a0ac;
-}
 .comment {
   margin-bottom: 14px;
   background: white;
