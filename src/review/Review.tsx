@@ -1,5 +1,6 @@
 import {
   batch,
+  createComputed,
   createEffect,
   createMemo,
   createSignal,
@@ -107,6 +108,12 @@ export function Review(props: {
     const value = allLoaded();
     return value?.key === allKey() ? value.contents : undefined;
   });
+  const [visibleDiffs, setVisibleDiffs] = createSignal<string[]>([]);
+  const [searchAll, setSearchAll] = createSignal(false);
+  const [diffErrors, setDiffErrors] = createSignal<{ key: string; paths: Record<string, string> }>();
+  const failures = () => diffErrors()?.key === allKey() ? diffErrors()!.paths : {};
+  const busyDiffs = new Set<string>();
+  const [diffProgress, setDiffProgress] = createSignal(0);
   const parsedDiffs = new Map<string, FileDiffMetadata>();
   const [loading, setLoading] = createSignal(false);
   const [split, setSplit] = createSignal(saved.split);
@@ -332,31 +339,57 @@ export function Review(props: {
     });
   });
 
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
   createEffect(() => {
-    if (restoring() || !diffAll() || comparing() || allContents()) return;
-    let active = true;
+    diffProgress();
+    if (restoring() || !diffAll() || comparing()) return;
+    setLoading(false);
     const key = allKey();
     const { base, target } = comparison();
     const revision = contentRevision();
-    // Keeps a comparison error; comparing clears errors when it starts.
-    setLoading(true);
-    Promise.all(paths().map((path) => Promise.all([
-      loadFile(path, base, revision),
-      loadFile(path, target, revision),
-    ]).then(([oldFile, newFile]) => [path, { oldFile, newFile }] as const)))
-      .then(batched((contents) => {
-        if (!active) return;
-        setAllLoaded({ key, contents: Object.fromEntries(contents) });
-        setLoading(false);
-      }))
-      .catch(batched((e) => {
-        if (!active) return;
-        setError(e.message);
-        setLoading(false);
-      }));
-    onCleanup(() => {
-      active = false;
-    });
+    const contents = allContents();
+    const errors = failures();
+    const listed = new Set(paths());
+    // Rebuild demand rather than queueing the entire comparison. Selection
+    // takes priority; scrolling away or changing scopes drops unstarted work.
+    const foreground = new Set([selected(), ...visibleDiffs(), ...(searchAll() ? paths() : [])]);
+    const displayed = order();
+    const index = displayed.indexOf(selected());
+    // Anchor look-ahead to selection, never to the loaded/virtualized frontier:
+    // completing a speculative load must not walk the rest of the comparison.
+    const nearby = index < 0 ? [] : [displayed[index + 1], displayed[index + 2], displayed[index - 1]];
+    const wanted = new Set([...foreground, ...nearby.filter((path): path is string => !!path)]);
+    for (const path of wanted) {
+      if (busyDiffs.size >= 3) break; // Three file pairs, at most six requests.
+      // One speculative pair only, after foreground work drains. Leave two
+      // slots available for a new selection or viewport while it is in flight.
+      if (!foreground.has(path) && busyDiffs.size) break;
+      const request = JSON.stringify([key, path]);
+      if (!listed.has(path) || contents?.[path] || errors[path] || busyDiffs.has(request)) continue;
+      busyDiffs.add(request);
+      // Keep the slot until both requests finish, including after one fails.
+      Promise.allSettled([loadFile(path, base, revision), loadFile(path, target, revision)])
+        .then(([oldFile, newFile]) => {
+          if (disposed || untrack(allKey) !== key) return;
+          if (oldFile.status === "rejected") throw oldFile.reason;
+          if (newFile.status === "rejected") throw newFile.reason;
+          setAllLoaded((current) => ({
+            key,
+            contents: { ...(current?.key === key ? current.contents : {}), [path]: { oldFile: oldFile.value, newFile: newFile.value } },
+          }));
+        })
+        .catch((e) => {
+          if (disposed || untrack(allKey) !== key) return;
+          setDiffErrors((current) => ({
+            key, paths: { ...(current?.key === key ? current.paths : {}), [path]: e.message },
+          }));
+        })
+        .finally(() => {
+          busyDiffs.delete(request);
+          if (!disposed) setDiffProgress((value) => value + 1);
+        });
+    }
   });
 
   async function compare(nextMode: string, {
@@ -555,7 +588,7 @@ export function Review(props: {
     }));
   // CodeView needs a new version when the same item gets new text or annotations.
   let versionCount = 0;
-  const versionedContent = createMemo<unknown>(() => diffAll() ? allContents() : content());
+  const versionedContent = createMemo<unknown>(() => diffAll() ? undefined : content());
   const itemVersion = createMemo(on([comments, versionedContent], () => ++versionCount));
   // Unreviewed files first, then reviewed ones, each in file tree order.
   const order = createMemo(() => {
@@ -566,18 +599,23 @@ export function Review(props: {
   });
   const noticeFor = (path: string) => {
     const content = allContents()?.[path];
-    if (!content || isMessage(path)) return undefined;
+    if (isMessage(path)) return undefined;
+    if (!content) return failures()[path] || "Loading…";
     if (!content.oldFile && !content.newFile)
       return "File no longer exists. Refresh to update the file list.";
     return content.newFile?.notice || content.oldFile?.notice ||
       (!content.oldFile?.contents && !content.newFile?.contents ? "Empty file" : undefined);
   };
   const viewedSources = createMemo(() => [{ path: selected(), file: fileSource() }]);
-  // Find searches every file of the all-files diff, in display order.
-  const allSources = createMemo(on([allContents, order, messageContent], ([contents, paths, message]) =>
-    contents ? paths.flatMap<TextSearchSource>((path) => isMessage(path)
+  const searchPending = createMemo(() => searchAll()
+    ? paths().filter((path) => !allContents()?.[path] && !failures()[path]).length : 0);
+  // An explicit search loads the comparison with the same request limit.
+  // Publish complete results together so arriving files cannot move the match
+  // under the user's cursor or silently report a partial search as complete.
+  const allSources = createMemo(on([allContents, order, messageContent, searchPending], ([contents, paths, message, pending]) =>
+    !pending ? paths.flatMap<TextSearchSource>((path) => isMessage(path)
       ? [{ path, file: message?.newFile }]
-      : noticeFor(path) ? [] : [{ path, diff: parseDiff(diffKey(path), contents[path]) }])
+      : !contents?.[path] || noticeFor(path) ? [] : [{ path, diff: parseDiff(diffKey(path), contents[path]) }])
       : []));
   const find = useTextSearch({
     sources: () => diffAll() ? allSources() : viewedSources(),
@@ -585,21 +623,39 @@ export function Review(props: {
     // Moving between files of the all-files diff keeps the search.
     contentKey: () => diffAll() ? allKey() : contentKey(),
   });
+  // Hide incomplete results before effects can follow a cached partial match.
+  createComputed(() => setSearchAll(diffAll() && find.open() && !!find.query()));
   // Keep item objects stable across unrelated updates: CodeView resets its
   // items when any item changes identity, which drops a pending scrollTo,
   // e.g. from J/K. Annotations follow comments through itemVersion.
+  const itemCache = new Map<string, { content?: Content; version: number; notice?: string; item: CodeViewItem<Comment> }>();
+  let itemCacheKey = "", nextItemVersion = 0;
   const allItems = createMemo(on(
-    [diffAll, allContents, order, messageContent, itemVersion],
-    ([all, contents, paths, message, version]) => all && contents ? paths.map((path) => {
-      const shared = { id: path, annotations: annotationsFor(path), version };
-      if (isMessage(path)) return { ...shared, type: "file", file: message?.newFile };
-      const notice = noticeFor(path);
-      // Files without a previewable diff show only their header.
-      return notice
-        ? { ...shared, type: "diff", collapsed: true,
-            fileDiff: parseDiff(diffKey(path), { oldFile: null, newFile: { name: path, contents: "" } }) }
-        : { ...shared, type: "diff", fileDiff: parseDiff(diffKey(path), contents[path]) };
-    }) : [],
+    [diffAll, allKey, allContents, order, messageContent, itemVersion, diffErrors],
+    ([all, key, contents, paths, message, version]) => {
+      if (itemCacheKey !== key) {
+        itemCache.clear();
+        itemCacheKey = key;
+      }
+      return all ? paths.map((path) => {
+        const source = isMessage(path) ? message : contents?.[path];
+        const notice = noticeFor(path);
+        const cached = itemCache.get(path);
+        if (cached && cached.content === source && cached.version === version && cached.notice === notice)
+          return cached.item;
+        const shared = { id: path, annotations: annotationsFor(path), version: ++nextItemVersion };
+        // Unloaded files reserve a header in the virtual list. Only mounted
+        // headers, selected neighbors, and explicit Find request their diff.
+        const item: CodeViewItem<Comment> = isMessage(path)
+          ? { ...shared, type: "file", file: message!.newFile! }
+          : notice
+            ? { ...shared, type: "diff", collapsed: true,
+                fileDiff: parseDiff(`placeholder:${diffKey(path)}`, { oldFile: null, newFile: { name: path, contents: "" } }) }
+            : { ...shared, type: "diff", fileDiff: parseDiff(diffKey(path), source!) };
+        itemCache.set(path, { content: source, version, notice, item });
+        return item;
+      }) : [];
+    },
   ));
   const fileItems = createMemo(on(
     [diffAll, content, notice, fileSource, selected, singleSide, itemVersion],
@@ -659,6 +715,7 @@ export function Review(props: {
   // diff: not after navigating to a file, which may be too short to reach the
   // top, and not when panels or wrapping change the layout.
   let scrollIntent = false;
+  let lazyScroll: { key: string; path: string; offset: number } | undefined;
   {
     // Whether the latest interaction scrolls the diff.
     const track = (event: Event) => {
@@ -670,6 +727,8 @@ export function Review(props: {
         event instanceof PointerEvent && event.target === element &&
           event.offsetX >= element.clientWidth
       );
+      if (scrollIntent || event.type === "pointerdown" && element && event.composedPath().includes(element))
+        lazyScroll = undefined;
     };
     const types = ["wheel", "touchstart", "pointerdown", "keydown"];
     for (const type of types)
@@ -683,6 +742,7 @@ export function Review(props: {
   let lastScrollTop = 0;
   // The viewed file follows the current match of a search across files.
   const findMatch = createMemo(() => find.open() ? find.matches()[find.active()] : undefined);
+  createEffect(on(find.open, (open) => { if (open) lazyScroll = undefined; }));
   createEffect(on(findMatch, (match) => {
     if (!diffAll() || !match || match.path === selected()) return;
     replaceURL = true;
@@ -692,6 +752,7 @@ export function Review(props: {
     const instance = viewer();
     if (!instance || !order().includes(path)) return;
     scrollIntent = false;
+    lazyScroll = { key: allKey(), path, offset };
     instance.scrollTo({ type: "item", id: path, align: "start", offset: -offset });
   }
   const onViewerScroll = (scrollTop: number, instance: CodeViewInstance<Comment>) => {
@@ -728,9 +789,8 @@ export function Review(props: {
   };
   const [scrollRequest, setScrollRequest] = createSignal<{ path: string }>();
   createEffect(on([scrollRequest, diffAll, allContents, loading, comparing, viewer], () => {
-    if (!diffAll() || !allContents() || loading() || comparing() || !viewer()) return;
+    if (!diffAll() || loading() || comparing() || !viewer()) return;
     if (restoredKey !== allKey()) {
-      restoredKey = allKey();
       scrollIntent = false;
       // A pending comment scrolls to its own lines.
       const path = order().includes(selected()) ? selected() : order()[0];
@@ -738,12 +798,23 @@ export function Review(props: {
         replaceURL = true;
         setSelected(path);
       }
+      const ready = !path || isMessage(path) || allContents()?.[path] || failures()[path];
+      if (ready) restoredKey = allKey();
       if (!pendingComment() && path)
-        scrollToFile(path, scrollStore(info().root)[fileScrollKey(path)]?.top);
+        scrollToFile(path, ready ? scrollStore(info().root)[fileScrollKey(path)]?.top : 0);
     } else if (scrollRequest()) {
       scrollToFile(scrollRequest()!.path);
     }
     setScrollRequest(undefined);
+  }));
+
+  // A short destination can be clamped above its header while the preceding
+  // files are placeholders. Keep the requested file anchored as they expand,
+  // until the user scrolls or another interaction owns the destination.
+  createEffect(on([allContents, viewer], () => {
+    if (lazyScroll?.key !== allKey() || !diffAll() || pendingComment() || find.open()) return;
+    const { path, offset } = lazyScroll;
+    viewer()?.scrollTo({ type: "item", id: path, align: "start", offset: -offset });
   }));
 
   createEffect(on(
@@ -754,6 +825,7 @@ export function Review(props: {
         return;
       skipScrollRestore();
       scrollIntent = false;
+      lazyScroll = undefined;
       instance.scrollTo(comment.file ? {
         type: "item",
         id: comment.path,
@@ -1134,6 +1206,8 @@ export function Review(props: {
       selectedLines={selectedLines()}
       onSelectedLinesChange={(selection) => setLinePreview(selection)}
       onScroll={diffAll() ? onViewerScroll : undefined}
+      onRenderedItemsChange={diffAll() ? (ids) => setVisibleDiffs((current) =>
+        current.length === ids.length && current.every((id, index) => id === ids[index]) ? current : ids) : undefined}
       renderCustomHeader={diffAll() ? (item) => (
         <DiffFileHeader
           path={item.id}
@@ -1141,6 +1215,9 @@ export function Review(props: {
           href={fileHref(item.id)}
           stats={entries().find((entry) => entry.path === item.id)}
           notice={noticeFor(item.id)}
+          onRetry={failures()[item.id] ? () => setDiffErrors((current) => ({
+            key: allKey(), paths: Object.fromEntries(Object.entries(current?.paths || {}).filter(([path]) => path !== item.id)),
+          })) : undefined}
           current={item.id === selected()}
           reviewed={reviewedInView()?.includes(item.id) || false}
           reviewDisabled={loading() || comparing()}
@@ -1279,7 +1356,7 @@ export function Review(props: {
           tab={tab()}
           paths={paths()}
           entries={entries()}
-          lineCounts={info().lineCounts}
+          refresh={contentRevision()}
           hasMessage={hasMessage()}
           reviewed={reviewedInView()}
           reviewScope={reviewScope()}
@@ -1303,6 +1380,10 @@ export function Review(props: {
           <Show when={find.open()}>
             <TextSearchBar
               search={find}
+              status={searchAll() ? searchPending()
+                ? `Searching ${searchPending()} remaining files…`
+                : Object.keys(failures()).length ? `${Object.keys(failures()).length} files could not be searched` : undefined
+                : undefined}
               onClose={batched(() => {
                 find.close();
                 focusViewer();

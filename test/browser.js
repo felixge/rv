@@ -175,6 +175,10 @@ const otherSearchHighlights = () =>
     .filter(range => range.startContainer.isConnected)
     .map(range => ({ text: range.toString(), left: Math.round(range.getBoundingClientRect().left) }))`);
 async function selectCodeText(text, occurrence = 0) {
+  // Tokenization replaces text nodes, and nearby placeholders can change
+  // geometry. Take drag coordinates only once the visible code has settled.
+  await wait(`${shadow}?.querySelector('pre span[style]') && ![...document.querySelectorAll('.file-notice')].some(n => n.textContent === 'Loading…')`);
+  await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   const points = await evaluate(`(() => {
     const root = ${shadow};
     const matches = [];
@@ -557,6 +561,9 @@ try {
   await wait("document.activeElement.getAttribute('aria-label') === 'Search review scopes'");
   await browser("press", "Escape");
   await wait("!document.querySelector('.review-popover')");
+  assert.equal(await evaluate("performance.getEntriesByType('resource').filter(e => e.name.includes('/api/line-counts')).length"), 0);
+  await browser("find", "role", "button", "click", "--name", "Count lines", "--exact");
+  await wait("document.querySelector('.sidebar-header .lines-total')");
   assert.equal(await lineStats(), "33 total lines of code");
   assert.equal(
     await evaluate(
@@ -780,7 +787,11 @@ try {
   const srcFolder = "document.querySelector('file-tree-container').shadowRoot.querySelector('[role=treeitem][aria-label=src]')";
   assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
   await browser("fill", '[aria-label="Find a file"]', "shipping.ts");
+  assert.equal(await evaluate("performance.getEntriesByType('resource').filter(e => e.name.includes('/api/line-counts')).length"), 0);
+  await browser("find", "role", "button", "click", "--name", "Count lines", "--exact");
+  await wait("document.querySelector('.sidebar-header .lines-total')");
   assert.equal(await lineStats(), "21 total lines of code");
+  await browser("focus", '[aria-label="Find a file"]');
   await browser("press", "Control+a");
   await browser("press", "Backspace");
   assert.equal(await evaluate(`${srcFolder}.getAttribute('aria-expanded')`), "false");
@@ -1621,6 +1632,7 @@ try {
   await capture("commit-message-review");
   assert.deepEqual(await highlightedLines(), [3, 4]);
   await click("Hide comments");
+  await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   await browser("click", ".comment-marker");
   await wait("document.activeElement.classList.contains('comment')");
   assert.equal(

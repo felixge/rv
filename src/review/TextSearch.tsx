@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { batch, createComputed, createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import type { CodeViewInstance } from "../components/CodeView";
 import {
@@ -96,7 +96,11 @@ export function useTextSearch(options: {
     document.removeEventListener("dblclick", onTextSelection);
   });
   createEffect(on([contentKey, viewerMode], () => setHighlightSelectedText(false)));
-  createEffect(on([query, contentKey, viewerMode, split, expanded], () => {
+  // Choose the match before effects follow it to another file, including when
+  // an asynchronous all-files search publishes its completed sources.
+  createComputed(on([query, contentKey, viewerMode, split, expanded, sources], () => {
+    // Loading other files must not replace an explicitly selected occurrence.
+    if (highlightSelectedText() && selectedMatch === null) return;
     // Start at the first match in or after the selected file.
     const all = sources();
     const after = new Set(all
@@ -209,6 +213,7 @@ export function useTextSearch(options: {
 
 export function TextSearchBar(props: {
   search: ReturnType<typeof useTextSearch>;
+  status?: string;
   onClose: () => void;
 }) {
   const { search } = props;
@@ -228,9 +233,9 @@ export function TextSearchBar(props: {
         }}
       />
       <span aria-live="polite">
-        {search.query()
+        {props.status || (search.query()
           ? `${search.matches().length ? search.active() + 1 : 0}/${search.matches().length}`
-          : "0/0"}
+          : "0/0")}
       </span>
       <button aria-label="Previous match" disabled={!search.matches().length} onClick={() => search.move(-1)}>
         ↑

@@ -124,6 +124,7 @@ export function DiffFileHeader(props: {
   href: string;
   stats?: Entry;
   notice?: string;
+  onRetry?: () => void;
   current: boolean;
   reviewed: boolean;
   reviewDisabled: boolean;
@@ -155,6 +156,9 @@ export function DiffFileHeader(props: {
         <span class="file-notice">{props.notice}</span>
       </Show>
       <div class="file-actions">
+        <Show when={props.onRetry}>
+          <button onClick={() => props.onRetry?.()} aria-label={`Retry loading ${props.path}`}>Retry</button>
+        </Show>
         <Show when={!props.title}>
           <FileCommentButton path={props.path} disabled={props.reviewDisabled} onClick={props.onComment} />
         </Show>

@@ -18,7 +18,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "node bin/rv.js",
     "test": "node --test test/*.test.js",
-    "test:browser": "node test/browser.js",
+    "test:browser": "node test/browser.js && node test/lazy-diff.js",
     "test:performance": "node test/startup.js && node test/navigation.js",
     "prepack": "npm run build"
   },

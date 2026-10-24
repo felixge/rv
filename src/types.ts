@@ -21,7 +21,6 @@ export type Info = {
   isGit: boolean;
   branch: string;
   files: string[];
-  lineCounts: Record<string, number | null>;
   working: Comparison;
   commits: { id: string; short: string; subject: string; date: string; pushed?: boolean }[];
   upstream: string;

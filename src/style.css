@@ -492,6 +492,10 @@ button.panel-toggle:hover {
   flex-shrink: 0;
 }
 .sidebar-header strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -501,7 +505,13 @@ button.panel-toggle:hover {
   font-size: 10px;
 }
 .sidebar-header .line-stats {
+  min-width: 0;
+  overflow: hidden;
   font-size: 10px;
+}
+.sidebar-header .line-stats > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sidebar-header .panel-toggle {
   margin-left: 2px;

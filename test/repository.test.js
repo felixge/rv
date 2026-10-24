@@ -33,8 +33,10 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   ]);
   // The Files explorer shows total lines of code per current file,
   // keyed like the file list, so scoped runs use scope-relative paths.
-  assert.ok(info.lineCounts["shipping.ts"] > 0);
-  assert.ok(!("legacy.ts" in info.lineCounts));
+  assert.ok(!("lineCounts" in info)); // startup does not count the whole checkout
+  const counts = await repo.lineCounts();
+  assert.ok(counts["shipping.ts"] > 0);
+  assert.ok(!("legacy.ts" in counts));
   // A staged deletion stays reviewable but absent from Files; recreating it
   // makes it a current file again, even while its deletion remains staged.
   f.git("add", "src/legacy.ts");
@@ -70,17 +72,19 @@ test("repository metadata larger than 16 MiB is not truncated", async (t) => {
   execFileSync("git", ["-C", f.root, "update-index", "--skip-worktree", "-z", "--stdin"], {
     input: paths,
   });
-  const info = await (await repository(f.root)).info();
+  const repo = await repository(f.root);
+  const info = await repo.info();
+  const counts = await repo.lineCounts();
   const files = new Set(info.files);
   const entries = new Map(info.working.entries.map((entry) => [entry.path, entry]));
   for (const name of names) {
     assert.ok(files.has(name));
-    assert.equal(info.lineCounts[name], null);
+    assert.equal(counts[name], null);
     assert.deepEqual(entries.get(name), {
       path: name, status: "A", additions: 3, deletions: 0,
     });
   }
-  assert.equal(info.lineCounts["README.md"], 3);
+  assert.equal(counts["README.md"], 3);
 });
 
 test("single commit, root commit and ranges use exact historical contents", async (t) => {
@@ -215,12 +219,14 @@ test("line counts preserve unusual paths and handle binary, empty and unterminat
     entries.find((e) => e.path === "untracked-binary.dat").additions,
     null,
   );
-  const lineCounts = (await repo.info()).lineCounts;
+  const lineCounts = await repo.lineCounts();
   assert.equal(lineCounts[name], 3);
   assert.equal(lineCounts["empty.txt"], 0);
   assert.equal(lineCounts["no-newline.txt"], 2);
   assert.equal(lineCounts["binary.dat"], null);
   assert.equal(lineCounts["untracked-binary.dat"], null);
+  await f.write("no-newline.txt", "changed\n");
+  assert.equal((await repo.lineCounts())["no-newline.txt"], 1);
   f.git("add", name);
   f.git("commit", "-qm", "Count historical lines");
   assert.deepEqual((await repo.compare("commit", "", "HEAD")).entries, [
@@ -292,6 +298,11 @@ test("HTTP is read-only, blocks cross-origin reads and serves the built UI", asy
   });
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal((await response.json()).commits.length, 3);
+  assert.equal((await fetch(`${url}/api/line-counts`)).status, 403);
+  const counts = await fetch(`${url}/api/line-counts`, { headers: { "X-Rv": "1" } });
+  assert.equal(counts.status, 200);
+  assert.equal(counts.headers.get("cache-control"), "no-store");
+  assert.equal((await counts.json())["src/discount.ts"], 3);
   const html = await fetch(url);
   assert.equal(html.headers.get("cache-control"), "no-store");
   assert.match(await html.text(), /rv — local code review/);

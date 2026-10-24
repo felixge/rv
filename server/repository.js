@@ -273,22 +273,6 @@ export async function repository(directory) {
       }
     }
     const fileList = await files();
-    // Line totals for the Files explorer, where change stats make no sense.
-    // Unavailable text (binary, oversized, symlinked) has no line total.
-    // A few workers share the list: reading every file at once holds one
-    // descriptor per file and exhausts the limit in large repositories.
-    const lineCounts = {};
-    let next = 0;
-    await Promise.all(
-      Array.from({ length: 16 }, async () => {
-        while (next < fileList.length) {
-          const name = fileList[next++];
-          const source = await file(name).catch(() => null);
-          lineCounts[name] =
-            source && !source.notice ? countLines(source.contents) : null;
-        }
-      }),
-    );
     return {
       root,
       name: path.posix.join(
@@ -300,10 +284,31 @@ export async function repository(directory) {
       commits,
       upstream,
       files: fileList,
-      lineCounts,
       working: await compare(),
     };
   }
 
-  return { root, info, compare, file };
+  // Only the Files explorer needs totals. Keep its full-repository scan off
+  // the startup/refresh path and leave I/O capacity for interactive previews.
+  let counting;
+  function lineCounts() {
+    // Multiple tabs share one scan, rather than multiplying the open-file cap.
+    if (counting) return counting;
+    counting = (async () => {
+      const names = await files();
+      const counts = {};
+      let next = 0;
+      await Promise.all(Array.from({ length: 4 }, async () => {
+        while (next < names.length) {
+          const name = names[next++];
+          const source = await file(name).catch(() => null);
+          counts[name] = source && !source.notice ? countLines(source.contents) : null;
+        }
+      }));
+      return counts;
+    })().finally(() => { counting = undefined; });
+    return counting;
+  }
+
+  return { root, info, compare, file, lineCounts };
 }

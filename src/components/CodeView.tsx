@@ -33,12 +33,15 @@ export function CodeView<A>(props: {
   selectedLines: CodeViewLineSelection | null;
   onSelectedLinesChange: (selection: CodeViewLineSelection | null) => void;
   onScroll?: (scrollTop: number, viewer: CodeViewInstance<A>) => void;
+  onRenderedItemsChange?: (ids: string[]) => void;
   renderCustomHeader?: (item: CodeViewItem<A>) => JSX.Element;
   renderAnnotation: (annotation: DiffLineAnnotation<A>) => JSX.Element;
   // Receives the viewer once mounted, and undefined when it unmounts.
   ref: (viewer: CodeViewInstance<A> | undefined) => void;
 }) {
   let container!: HTMLDivElement;
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
   const owner = getOwner();
   const hasCustomHeader = untrack(() => !!props.renderCustomHeader);
   const managedOptions = createMemo<CodeViewOptions<A, undefined>>(() => ({
@@ -76,6 +79,9 @@ export function CodeView<A>(props: {
   // CodeView pools a file element for reuse once its slot content is removed.
   function onSnapshotChange(snapshot: CodeViewSlotSnapshot<A, undefined> | undefined) {
     const rendered = new Map(snapshot?.items?.map((item) => [item.element, item]));
+    // Loading can update items. Never update the viewer during its own render.
+    const ids = [...rendered.values()].map((item) => item.id);
+    queueMicrotask(() => { if (!disposed) props.onRenderedItemsChange?.(ids); });
     for (const [element, slot] of slots) {
       const item = rendered.get(element);
       if (item && slotKey(item) === slot.key) continue;

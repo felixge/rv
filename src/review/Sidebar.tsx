@@ -1,7 +1,8 @@
-import { createMemo, For, Show, type Setter } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show, type Setter } from "solid-js";
 import { BrowserTree, directoryPaths } from "../components/BrowserTree";
 import { LineStats } from "../components/LineStats";
 import { PanelResizeHandle } from "../components/PanelResizeHandle";
+import { api } from "../lib/api";
 import { MESSAGE_PATH, type Entry } from "../types";
 
 // The file browser: unreviewed and reviewed trees with search and line stats.
@@ -9,7 +10,7 @@ export function Sidebar(props: {
   tab: string;
   paths: string[];
   entries: Entry[];
-  lineCounts: Record<string, number | null>;
+  refresh: number;
   hasMessage: boolean;
   reviewed?: string[];
   reviewScope: string;
@@ -30,6 +31,16 @@ export function Sidebar(props: {
   onResize: (width: number) => void;
   hidden: boolean;
 }) {
+  // Reading the whole checkout is optional, never a prerequisite for browsing.
+  // A refresh invalidates the totals without starting another scan.
+  const [countRequest, setCountRequest] = createSignal<number>();
+  const [counts, { refetch }] = createResource(
+    () => countRequest() === undefined ? false : String(countRequest()),
+    (refresh) => api<Record<string, number | null>>("line-counts", { refresh }),
+  );
+  const currentCounts = () => countRequest() === props.refresh && !counts.error && !counts.loading
+    ? counts() : undefined;
+  const counting = () => countRequest() === props.refresh && counts.loading;
   const reviewed = () => props.reviewed || [];
   const groups = createMemo(() => [
     props.paths.filter((path) => !reviewed().includes(path)),
@@ -43,9 +54,11 @@ export function Sidebar(props: {
     const fileSearch = props.search.trim().replaceAll("\\", "/").toLowerCase();
     const visible = groupPaths.filter((path) => path.toLowerCase().includes(fileSearch));
     if (props.tab === "files") {
-      const missing = visible.some((path) => props.lineCounts[path] == null);
+      const totals = currentCounts();
+      if (!totals) return undefined;
+      const missing = visible.some((path) => totals[path] == null);
       return {
-        lines: visible.reduce((sum, path) => sum + (props.lineCounts[path] || 0), 0),
+        lines: visible.reduce((sum, path) => sum + (totals[path] || 0), 0),
         title: `Total lines of code${missing ? "; excludes binary or unpreviewable files" : ""}`,
       };
     }
@@ -72,7 +85,18 @@ export function Sidebar(props: {
         <span class="file-count">
           {props.paths.length + (props.hasMessage ? 1 : 0)}
         </span>
-        <LineStats {...unreviewedStats()} />
+        <Show when={unreviewedStats()} fallback={
+          <button
+            class="text-button line-stats"
+            title={counts.error ? "Line count failed. Click to retry." : "Read all repository files to count lines"}
+            disabled={counting()}
+            onClick={() => countRequest() === props.refresh ? refetch() : setCountRequest(props.refresh)}
+          >
+            {counting() ? "Counting…" : counts.error ? "Retry count" : "Count lines"}
+          </button>
+        }>
+          {(stats) => <LineStats {...stats()} />}
+        </Show>
         <button
           class="panel-toggle"
           aria-label="Hide file browser"
@@ -139,7 +163,9 @@ export function Sidebar(props: {
                         {reviewedCount()}
                       </span>
                     </span>
-                    <LineStats {...groupStats(groupPaths())} />
+                    <Show when={groupStats(groupPaths())}>
+                      {(stats) => <LineStats {...stats()} />}
+                    </Show>
                   </div>
                 </Show>
                 <Show when={treeKey()} keyed>
