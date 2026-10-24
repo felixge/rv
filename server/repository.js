@@ -275,12 +275,18 @@ export async function repository(directory) {
     const fileList = await files();
     // Line totals for the Files explorer, where change stats make no sense.
     // Unavailable text (binary, oversized, symlinked) has no line total.
+    // A few workers share the list: reading every file at once holds one
+    // descriptor per file and exhausts the limit in large repositories.
     const lineCounts = {};
+    let next = 0;
     await Promise.all(
-      fileList.map(async (name) => {
-        const source = await file(name).catch(() => null);
-        lineCounts[name] =
-          source && !source.notice ? countLines(source.contents) : null;
+      Array.from({ length: 16 }, async () => {
+        while (next < fileList.length) {
+          const name = fileList[next++];
+          const source = await file(name).catch(() => null);
+          lineCounts[name] =
+            source && !source.notice ? countLines(source.contents) : null;
+        }
       }),
     );
     return {
