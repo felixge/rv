@@ -37,7 +37,15 @@ let active = 0, peak = 0, delay = 80, server;
 let blocked;
 const failures = new Set();
 async function idle() {
-  for (let i = 0; i < 100 && active; i++) await sleep(100);
+  // The server can finish a pair before the browser receives it and starts
+  // the next preload. A moment with no active requests is not yet idle.
+  let quiet = 0;
+  for (let i = 0; i < 100 && quiet < 6; i++) {
+    const count = calls.length;
+    await sleep(100);
+    quiet = !active && calls.length === count ? quiet + 1 : 0;
+  }
+  assert.equal(quiet, 6, "File loading must reach sustained idle");
   assert.equal(active, 0, "File requests must settle");
   const count = calls.length;
   await sleep(600);
