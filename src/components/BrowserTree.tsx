@@ -97,7 +97,9 @@ export function BrowserTree(props: {
   let syncingExpansion = false;
   const { paths, includeMessage, reviewed } = untrack(() => ({ ...props }));
   const treePaths = includeMessage ? [MESSAGE_TREE_PATH, ...paths] : paths;
-  const stats = createMemo(() => diffStats(props.entries));
+  // Directories sum only this tree's files, not files in the other section.
+  const ownPaths = new Set(paths);
+  const stats = createMemo(() => diffStats(props.entries.filter((entry) => ownPaths.has(entry.path))));
   const model = new FileTree({
     paths: treePaths,
     sort: (left, right) =>

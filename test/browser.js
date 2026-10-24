@@ -878,6 +878,30 @@ try {
   await browser("focus", '[aria-label="Find a file"]');
   await browser("press", "Control+a");
   await browser("press", "Backspace");
+  // Directory stats sum only the files in their own section.
+  const srcStats = (section) => evaluate(
+    `document.querySelector('section[aria-label=${section}] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=src] [data-item-section=decoration]')?.textContent`,
+  );
+  assert.equal(await srcStats("Unreviewed"), "+6−4");
+  await hoverTree("shipping.ts");
+  await wait(
+    "document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"][data-visible=true]')",
+  );
+  await evaluate(
+    "document.querySelector('section[aria-label=Unreviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark reviewed\"]').click()",
+  );
+  await wait("document.querySelector('section[aria-label=Reviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=\"shipping.ts\"]')");
+  assert.equal(await srcStats("Unreviewed"), "+3−1");
+  assert.equal(await srcStats("Reviewed"), "+3−3");
+  await hoverTree("shipping.ts", "Reviewed");
+  await wait(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark unreviewed\"][data-visible=true]')",
+  );
+  await evaluate(
+    "document.querySelector('section[aria-label=Reviewed] file-tree-container').shadowRoot.querySelector('[aria-label=\"Mark unreviewed\"]').click()",
+  );
+  await wait("document.querySelector('section[aria-label=Unreviewed] file-tree-container')?.shadowRoot?.querySelector('[role=treeitem][aria-label=\"shipping.ts\"]')");
+  assert.equal(await srcStats("Unreviewed"), "+6−4");
   let text = await codeText();
   assert.match(text, /THRESHOLD = 100/);
   assert.match(text, /THRESHOLD = 75/);
