@@ -15,11 +15,11 @@ export type Command =
   | "toggle-comments" | "expand-diff" | "collapse-diff" | "refresh" | "cancel";
 export const shortcuts: Shortcut[] = [
   { command: "palette", bind: "?", keys: ["?", "or", "⌘", "K"], label: "Open command launcher", category: "General" },
-  { command: "find-viewed-file", keys: ["⌘/Ctrl", "F"], label: "Find in viewed file", category: "Navigate" },
+  { command: "find-viewed-file", bind: "/", keys: ["/", "or", "⌘/Ctrl", "F"], label: "Find in viewed file", category: "Navigate" },
   { command: "next-text-match", keys: ["⌘/Ctrl", "G"], label: "Find next match", category: "Navigate" },
   { command: "previous-text-match", keys: ["⌘/Ctrl", "Shift", "G"], label: "Find previous match", category: "Navigate" },
   { command: "find-file", bind: "f", keys: ["F"], label: "Find a file", category: "Navigate" },
-  { command: "search-files", bind: "/", keys: ["/"], label: "Search files", category: "Navigate" },
+  { command: "search-files", keys: [], label: "Search files", category: "Navigate" },
   { command: "next-file", bind: "j", keys: ["J"], label: "Next file", category: "Navigate" },
   { command: "previous-file", bind: "k", keys: ["K"], label: "Previous file", category: "Navigate" },
   { command: "file-browser", bind: "gf", keys: ["G", "F"], label: "Open File Browser", category: "Navigate" },

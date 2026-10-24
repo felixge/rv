@@ -76,8 +76,8 @@ hunks.
 
 ### Find anything
 
-<kbd>F</kbd> opens a fuzzy file finder, and <kbd>/</kbd> filters the file
-tree. <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>F</kbd> searches the viewed file, or
+<kbd>F</kbd> opens a fuzzy file finder. <kbd>/</kbd> or
+<kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>F</kbd> searches the viewed file, or
 every file in the diff, and highlights each match;
 <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>G</kbd> jumps to the next one. <kbd>J</kbd>
 and <kbd>K</kbd> move between files.

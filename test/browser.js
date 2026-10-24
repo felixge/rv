@@ -2118,7 +2118,8 @@ try {
   await f.write("src/cross-b.ts", "// b\nconst b = 'crossFileTarget';\n");
   await browser("open", `${url}/?mode=working&path=src%2Fcross-a.ts`);
   await wait(`${currentHeading}?.dataset.path === 'src/cross-a.ts'`);
-  await browser("press", "Control+f");
+  await browser("press", "/");
+  await wait("document.activeElement?.getAttribute('aria-label') === 'Find in viewed file' && document.activeElement.value === ''");
   await browser("fill", '[aria-label="Find in viewed file"]', "crossFileTarget");
   await wait("document.querySelector('.text-search span')?.textContent === '1/2'");
   assert.equal((await activeSearchHighlight()).line, 1);

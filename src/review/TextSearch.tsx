@@ -23,7 +23,7 @@ export type TextSearchSource = {
   diff?: FileDiffMetadata | null;
 };
 
-// Find (Cmd/Ctrl+F) in the viewed file, or in every file of the all-files
+// Find (/ or Cmd/Ctrl+F) in the viewed file, or in every file of the all-files
 // diff, plus highlighting other occurrences of text selected on a single line.
 export function useTextSearch(options: {
   sources: Accessor<TextSearchSource[]>;
