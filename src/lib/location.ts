@@ -19,10 +19,13 @@ export function readPreferences(stored: unknown) {
 // entry points and in-app navigation.
 export function readLocation(info: Info) {
   const params = new URLSearchParams(location.search);
-  const urlMode = params.get("mode") || "";
+  // Without a mode, open on uncommitted changes, else the latest commit; the
+  // File Browser is the fallback for repositories without either.
+  const urlMode = params.get("mode") ??
+    (info.working.entries.length ? "working" : info.commits.length ? "commit" : "files");
   const changes = ["working", "commit", "range"].includes(urlMode);
   const from = (changes && params.get("from")) || "";
-  const to = (changes && params.get("to")) || "";
+  const to = (changes && params.get("to")) || (urlMode === "commit" ? "HEAD" : "");
   const view = params.get("view");
   return {
     tab: changes ? "changes" : "files",

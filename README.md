@@ -98,8 +98,9 @@ in a new tab. The URL records the selected file and review scope, including
 the revisions for a commit or range, the Diff/Old/New choice (`view=diff`,
 `view=old`, or `view=new`), split diffs, and expanded unchanged lines. Copy or
 bookmark it to return to that view; browser Back/Forward also works. Each tab
-navigates independently. Opening the bare URL starts in the File Browser;
-unsubmitted range choices are temporary and do not survive reload.
+navigates independently. Opening the bare URL starts on uncommitted changes,
+or on the most recent commit when there are none (the File Browser only when
+neither exists); unsubmitted range choices are temporary and do not survive reload.
 
 Your review state (comments, reviewed marks, layout preferences) is cached on
 local disk, outside the repository, in one readable directory per opened path —
@@ -124,9 +125,10 @@ Then run `rv` inside any repository:
 rv
 ```
 
-rv opens a browser and serves a read-only review UI on localhost. Refresh the
-page (or press <kbd>Shift</kbd>+<kbd>R</kbd>) when you want to load new
-repository changes; nothing is written back to the repository.
+rv opens a browser on your uncommitted changes, or on the most recent commit
+when the working tree is clean, and serves a read-only review UI on localhost.
+Refresh the page (or press <kbd>Shift</kbd>+<kbd>R</kbd>) when you want to
+load new repository changes; nothing is written back to the repository.
 
 Open directly on uncommitted changes, a single commit, or a commit range:
 

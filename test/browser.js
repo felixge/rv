@@ -239,7 +239,7 @@ try {
   // A killed or timed-out previous run may not have reached finally. Start from
   // a fresh browser instead of inheriting that session's page and input state.
   await browser("close").catch(() => {});
-  await browser("open", url);
+  await browser("open", `${url}/?mode=files`);
   await browser("set", "viewport", "1440", "900", "2");
   await wait("document.querySelector('.file-tree')");
 
@@ -357,7 +357,7 @@ try {
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('A small, predictable shipping calculator.')`);
   await browser("tab", "close", finderTab.tabId);
   await browser("tab", originalTab);
-  await browser("open", url);
+  await browser("open", `${url}/?mode=files`);
   await wait("document.querySelector('.file-tree')");
   assert.equal(await evaluate(`${heading}.querySelector('.file-path').hasAttribute('href')`), false);
   console.log("PASS Cmd/Ctrl/middle-click preserves the source tab; new tabs and reload retain files, commit messages, working/commit/range scopes; Back/Forward, finder and viewer header links work");
@@ -474,7 +474,7 @@ try {
   assert.equal(await evaluate("document.querySelector('[aria-label=\"View diff\"]').getAttribute('aria-current')"), "true");
   assert.equal(await evaluate("document.querySelector('.segmented a:first-child').getAttribute('aria-current')"), "true");
   assert.ok(await evaluate(`Boolean(${shadow}.querySelector('[data-unmodified-lines]'))`));
-  await browser("open", url);
+  await browser("open", `${url}/?mode=files`);
   await wait("document.querySelector('.file-tree')");
   assert.equal(await evaluate("Boolean(document.querySelector('.viewer-modes'))"), false);
   console.log("PASS Diff/Old/New show exact revisions, preserve mode in header links/reloads/history, keep comments on their side and handle added/deleted files");
@@ -1966,7 +1966,7 @@ try {
   const stateFile = statePath(f.root);
   const current = JSON.parse(await readFile(stateFile, "utf8"));
   await writeFile(stateFile, JSON.stringify({ ...current, version: current.version - 1 }));
-  await browser("open", url);
+  await browser("open", `${url}/?mode=files`);
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('File Browser')");
   assert.equal((await comments()).length, 0);
   await browser("open", "about:blank");
@@ -1988,7 +1988,7 @@ try {
 
   const unusualPath = "src/space #?&+% ü.ts";
   await f.write(unusualPath, "export const unusual = true;\n");
-  await browser("open", url);
+  await browser("open", `${url}/?mode=files`);
   await wait("document.querySelector('file-tree-container')?.shadowRoot?.querySelector('[data-item-path=\"src/space #?&+% ü.ts\"]')");
   await tree("space #?&+% ü.ts");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('unusual = true')`);
@@ -2225,6 +2225,22 @@ try {
   await browser("press", "k");
   await wait(atTop("t/a.ts"));
   console.log("PASS j/k in the all-files diff scrolls the next file to the top even when it is already visible");
+
+  // Without a mode, rv opens on uncommitted changes, or the latest commit
+  // once the working tree is clean.
+  const scopeLabel = "document.querySelector('[aria-label=\"Review scope\"]')?.textContent";
+  await browser("open", url);
+  await wait(`${scopeLabel}?.includes('Uncommitted changes') && ${shadow}?.querySelector('pre')`);
+  assert.equal(await evaluate("new URL(location.href).searchParams.get('mode')"), "working");
+  f.git("add", "-A");
+  f.git("commit", "-qm", "Commit everything");
+  await browser("open", url);
+  await wait(`${scopeLabel}?.includes('Commit everything') && ${heading}?.querySelector('.file-path')?.textContent.includes('Commit message')`);
+  assert.deepEqual(
+    await evaluate("Object.fromEntries(['mode', 'to'].map(key => [key, new URL(location.href).searchParams.get(key)]))"),
+    { mode: "commit", to: "HEAD" },
+  );
+  console.log("PASS rv opens on uncommitted changes, else the latest commit");
 
   const errors = await browser("errors");
   assert.deepEqual(errors.errors, []);
