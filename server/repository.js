@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readdir, lstat, realpath, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -10,6 +10,81 @@ const countLines = (text) =>
   text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 const unavailable = (name, notice) => ({ name, contents: "", notice });
 const TOO_LARGE = "File exceeds the 2 MiB preview limit.";
+
+// A long-running `git cat-file --batch` or `--batch-check` process. Each
+// lookup is a line on its stdin instead of a new git process. Resolves to
+// { type, size, data } (data only with --batch), or null for missing objects.
+function catFile(args, option) {
+  let child;
+  let buffer = Buffer.alloc(0);
+  let pending = [];
+  function drain() {
+    while (pending.length) {
+      const newline = buffer.indexOf(10);
+      if (newline < 0) return;
+      const [, type, size] = buffer.toString("latin1", 0, newline).split(" ");
+      let end = newline + 1;
+      let data;
+      if (option === "--batch" && size !== undefined) {
+        end += Number(size) + 1;
+        if (buffer.length < end) return;
+        data = buffer.subarray(newline + 1, end - 1);
+      }
+      buffer = buffer.subarray(end);
+      // Missing objects answer "<name> missing", without a size.
+      pending.shift().resolve(size === undefined ? null : { type, size: Number(size), data });
+    }
+    // Idle processes must not keep Node running.
+    child?.stdout.unref();
+  }
+  function stop(error) {
+    for (const request of pending) request.reject(error);
+    pending = [];
+    buffer = Buffer.alloc(0);
+    child = undefined;
+  }
+  return (object) =>
+    new Promise((resolve, reject) => {
+      if (!child) {
+        const current = (child = spawn("git", [...args, "cat-file", option], {
+          stdio: ["pipe", "pipe", "ignore"],
+        }));
+        current.unref();
+        current.stdin.unref();
+        current.stdout.on("data", (chunk) => {
+          buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
+          drain();
+        });
+        const failed = (error) => {
+          if (child === current) stop(error);
+        };
+        current.on("error", failed);
+        // Not "exit": an unreferenced child's exit may never be delivered.
+        current.stdout.on("close", () => failed(new Error("git cat-file exited.")));
+        current.stdin.on("error", failed);
+      }
+      pending.push({ resolve, reject });
+      child.stdout.ref();
+      child.stdin.write(`${object}\n`);
+    });
+}
+
+// Finds a name in a raw tree object: "<mode> <name>\0<binary object id>" entries.
+function treeEntry(tree, name, idBytes) {
+  const wanted = Buffer.from(name);
+  for (let i = 0; i < tree.length; ) {
+    const space = tree.indexOf(32, i);
+    const nul = tree.indexOf(0, space);
+    const next = nul + 1 + idBytes;
+    if (tree.subarray(space + 1, nul).equals(wanted))
+      return {
+        mode: tree.toString("latin1", i, space),
+        id: tree.toString("hex", nul + 1, next),
+      };
+    i = next;
+  }
+  return null;
+}
 
 export async function repository(directory) {
   const root = await realpath(directory);
@@ -25,6 +100,9 @@ export async function repository(directory) {
       })
     ).stdout;
   const git = (...args) => run(args);
+  const gitArgs = ["--no-optional-locks", "-C", root];
+  const objectInfo = catFile(gitArgs, "--batch-check");
+  const objectData = catFile(gitArgs, "--batch");
   let isGit = true;
   let gitRoot = root;
   try {
@@ -35,40 +113,53 @@ export async function repository(directory) {
   } catch {
     isGit = false;
   }
+  // Path from the repository root to the review scope, for tree walks.
+  const prefix = path.relative(gitRoot, root).split(path.sep);
 
+  // One process resolves the commit, its parents and its message.
   async function resolve(ref) {
     if (!ref || ref.length > 256)
       throw new Error("Enter a valid commit or branch.");
+    let output;
     try {
-      return (
-        await git(
-          "rev-parse",
-          "--verify",
-          "--end-of-options",
-          `${ref}^{commit}`,
-        )
-      ).trim();
+      output = await git(
+        "rev-list",
+        "--parents",
+        "-n",
+        "1",
+        "--format=%B",
+        "--end-of-options",
+        `${ref}^{commit}`,
+        "--",
+      );
     } catch {
       throw new Error(`Unknown commit: ${ref}`);
     }
+    const newline = output.indexOf("\n");
+    const [, id, ...parents] = output.slice(0, newline).split(" ");
+    return { id, parents, message: output.slice(newline + 1).replace(/\n$/, "") };
   }
 
+  let emptyTreeId;
   async function emptyTree() {
-    const result = exec("git", [
-      "-C",
-      root,
-      "hash-object",
-      "-t",
-      "tree",
-      "--stdin",
-    ]);
-    result.child.stdin.end();
-    return (await result).stdout.trim();
+    if (!emptyTreeId) {
+      const result = exec("git", [
+        "-C",
+        root,
+        "hash-object",
+        "-t",
+        "tree",
+        "--stdin",
+      ]);
+      result.child.stdin.end();
+      emptyTreeId = (await result).stdout.trim();
+    }
+    return emptyTreeId;
   }
 
   async function head() {
     try {
-      return await resolve("HEAD");
+      return (await resolve("HEAD")).id;
     } catch {
       return null;
     }
@@ -93,19 +184,24 @@ export async function repository(directory) {
     let data;
     if (ref) {
       if (!/^[a-f0-9]{40,64}$/.test(ref)) throw new Error("Invalid revision.");
-      // A missing file is distinct from an empty one. ls-tree also identifies submodules.
-      const entry = await git("ls-tree", "-z", ref, "--", name);
-      if (!entry) return null;
-      if (!entry.startsWith("100"))
+      // Walk the trees from the commit's root by object id, so paths never
+      // travel over the cat-file protocol. Tree entries carry the file mode,
+      // which identifies symbolic links and submodules.
+      let entry = { mode: "40000", id: `${ref}^{tree}` };
+      for (const part of [...prefix, ...name.split("/")].filter(Boolean)) {
+        // A missing file is distinct from an empty one.
+        if (entry.mode !== "40000") return null;
+        const tree = await objectData(entry.id);
+        if (!tree) throw new Error(`Unknown revision: ${ref}`);
+        entry = treeEntry(tree.data, part, ref.length / 2);
+        if (!entry) return null;
+      }
+      if (!entry.mode.startsWith("100"))
         return unavailable(name, "Symbolic links and submodules are not displayed.");
-      const size = Number(
-        (await git("cat-file", "-s", `${ref}:./${name}`)).trim(),
-      );
-      if (size > MAX_FILE) return unavailable(name, TOO_LARGE);
-      data = await run(["show", `${ref}:./${name}`], {
-        encoding: "buffer",
-        maxBuffer: MAX_FILE + 1024,
-      });
+      // Check the size before reading, so large blobs never cross the pipe.
+      if ((await objectInfo(entry.id)).size > MAX_FILE)
+        return unavailable(name, TOO_LARGE);
+      data = (await objectData(entry.id)).data;
     } else {
       const filename = path.join(root, name);
       try {
@@ -128,24 +224,30 @@ export async function repository(directory) {
     return { name, contents: data.toString("utf8") };
   }
 
+  // Lists the reviewable paths, and separately the untracked ones.
   async function files() {
     if (isGit) {
-      const deleted = new Set(split(await git("ls-files", "-z", "--deleted")));
-      return [
-        ...new Set(
-          split(
-            await git(
-              "ls-files",
-              "-z",
-              "--cached",
-              "--others",
-              "--exclude-standard",
-            ),
-          ),
+      // One process; -t tags deleted files "R" and untracked ones "?".
+      const tagged = split(
+        await git(
+          "ls-files",
+          "-z",
+          "-t",
+          "--cached",
+          "--deleted",
+          "--others",
+          "--exclude-standard",
         ),
-      ]
-        .filter((name) => !deleted.has(name))
-        .sort();
+      ).map((entry) => [entry[0], entry.slice(2)]);
+      const deleted = new Set(
+        tagged.filter(([tag]) => tag === "R").map(([, name]) => name),
+      );
+      return {
+        paths: [...new Set(tagged.map(([, name]) => name))]
+          .filter((name) => !deleted.has(name))
+          .sort(),
+        untracked: tagged.filter(([tag]) => tag === "?").map(([, name]) => name),
+      };
     }
     const paths = [];
     async function walk(dir = "") {
@@ -159,23 +261,22 @@ export async function repository(directory) {
       }
     }
     await walk();
-    return paths.sort();
+    return { paths: paths.sort(), untracked: [] };
   }
 
-  async function compare(mode = "working", from = "", to = "") {
+  // browse() passes the untracked files it already listed.
+  async function compare(mode = "working", from = "", to = "", untracked) {
     if (!isGit) return { mode: "working", base: "", target: "", entries: [] };
-    let base, target;
+    let base, target, message;
     if (mode === "working") {
       base = (await head()) || (await emptyTree());
       target = "";
     } else if (mode === "commit") {
-      target = await resolve(to);
-      const parents = (await git("rev-list", "--parents", "-n", "1", target))
-        .trim()
-        .split(" ");
-      base = parents[1] || (await emptyTree());
+      let parents;
+      ({ id: target, parents, message } = await resolve(to));
+      base = parents[0] || (await emptyTree());
     } else if (mode === "range") {
-      [base, target] = await Promise.all([resolve(from), resolve(to)]);
+      [{ id: base }, { id: target }] = await Promise.all([resolve(from), resolve(to)]);
       // GitHub-style semantics: diff from the merge base so commits already
       // on the base branch never appear as reversals in the range diff.
       const mergeBase = await git("merge-base", base, target).catch(() => "");
@@ -190,34 +291,39 @@ export async function repository(directory) {
       ...(target ? [target] : []),
       "--",
     ];
-    const [names, numstat] = await Promise.all([
-      git("diff", "--name-status", "-z", ...diffArgs),
-      git("diff", "--numstat", "-z", ...diffArgs),
+    // One process: --raw records (":modes oids status", then the path),
+    // followed by --numstat records ("added\tdeleted\tpath").
+    const [raw, recent, untrackedNames] = await Promise.all([
+      git("diff", "--raw", "--numstat", "-z", ...diffArgs),
+      // Where the commit is among the commits the review menu lists, so its
+      // URL can stay HEAD-relative without loading that list.
+      mode === "commit" ? git("rev-list", "-60", "HEAD").catch(() => "") : "",
+      target
+        ? []
+        : untracked ||
+          git("ls-files", "-z", "--others", "--exclude-standard").then(split),
     ]);
-    const stats = new Map(
-      split(numstat).map((record) => {
-        const [added, removed, ...name] = record.split("\t");
-        return [
-          name.join("\t"),
-          {
-            additions: added === "-" ? null : Number(added),
-            deletions: removed === "-" ? null : Number(removed),
-          },
-        ];
-      }),
-    );
-    const tokens = split(names);
-    const entries = [];
-    for (let i = 0; i < tokens.length; i += 2)
-      entries.push({
-        status: tokens[i],
-        path: tokens[i + 1],
-        ...stats.get(tokens[i + 1]),
+    const tokens = split(raw);
+    const statuses = [];
+    const stats = new Map();
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i].startsWith(":")) {
+        statuses.push([tokens[i].split(" ").pop(), tokens[++i]]);
+        continue;
+      }
+      const [added, removed, ...name] = tokens[i].split("\t");
+      stats.set(name.join("\t"), {
+        additions: added === "-" ? null : Number(added),
+        deletions: removed === "-" ? null : Number(removed),
       });
+    }
+    const entries = statuses.map(([status, name]) => ({
+      status,
+      path: name,
+      ...stats.get(name),
+    }));
     if (!target) {
-      for (const name of split(
-        await git("ls-files", "-z", "--others", "--exclude-standard"),
-      )) {
+      for (const name of untrackedNames) {
         // Reuse the preview's safety/size checks; unavailable text has no line total.
         const source = await file(name).catch(() => null);
         const text = source && !source.notice ? source.contents : null;
@@ -231,20 +337,44 @@ export async function repository(directory) {
       target,
       entries: entries.sort((a, b) => a.path.localeCompare(b.path)),
       ...(mode === "commit"
-        ? {
-            message: (await git("show", "-s", "--format=%B", target)).replace(
-              /\n$/,
-              "",
-            ),
-          }
+        ? { message, recent: recent.split("\n").indexOf(target) }
         : {}),
     };
   }
 
+  // Each screen loads only what it shows: info() is the header, browse()
+  // the File Browser, commits() the review menu, compare() a comparison.
   async function info() {
-    const revision = isGit ? await head() : null;
-    const commits = revision
-      ? (await git("log", "-60", "--format=%H%x00%h%x00%s%x00%an%x00%aI"))
+    const branch = isGit
+      ? (await git("symbolic-ref", "--short", "HEAD").catch(() => "")).trim() ||
+        (await head())?.slice(0, 7) ||
+        ""
+      : "";
+    return {
+      root,
+      name: path.posix.join(
+        path.basename(gitRoot),
+        path.relative(gitRoot, root).split(path.sep).join("/"),
+      ),
+      isGit,
+      branch,
+    };
+  }
+
+  async function browse() {
+    const { paths, untracked } = await files();
+    return { files: paths, working: await compare("working", "", "", untracked) };
+  }
+
+  async function commits() {
+    if (!isGit) return { commits: [], upstream: "" };
+    // The log fails before the first commit.
+    const [log, remotes] = await Promise.all([
+      git("log", "-60", "--format=%H%x00%h%x00%s%x00%an%x00%aI").catch(() => ""),
+      git("remote"),
+    ]);
+    const list = log
+      ? log
           .trimEnd()
           .split("\n")
           .map((line) => {
@@ -255,37 +385,16 @@ export async function repository(directory) {
     // A commit counts as pushed once any remote-tracking ref contains it.
     // Without remotes there is nothing to push to, so commits carry no state.
     let upstream = "";
-    if (commits.length && (await git("remote")).trim()) {
-      const unpushed = new Set(
-        (await git("rev-list", "HEAD", "--not", "--remotes")).split("\n"),
-      );
-      for (const commit of commits) commit.pushed = !unpushed.has(commit.id);
-      upstream = await git("rev-parse", "--abbrev-ref", "@{upstream}")
-        .then((name) => name.trim())
-        .catch(() => "remote");
+    if (list.length && remotes.trim()) {
+      const [unpushed, name] = await Promise.all([
+        git("rev-list", "HEAD", "--not", "--remotes"),
+        git("rev-parse", "--abbrev-ref", "@{upstream}").catch(() => "remote"),
+      ]);
+      const ids = new Set(unpushed.split("\n"));
+      for (const commit of list) commit.pushed = !ids.has(commit.id);
+      upstream = name.trim();
     }
-    let branch = "";
-    if (isGit) {
-      try {
-        branch = (await git("symbolic-ref", "--short", "HEAD")).trim();
-      } catch {
-        branch = revision?.slice(0, 7) || "";
-      }
-    }
-    const fileList = await files();
-    return {
-      root,
-      name: path.posix.join(
-        path.basename(gitRoot),
-        path.relative(gitRoot, root).split(path.sep).join("/"),
-      ),
-      isGit,
-      branch,
-      commits,
-      upstream,
-      files: fileList,
-      working: await compare(),
-    };
+    return { commits: list, upstream };
   }
 
   // Only the Files explorer needs totals. Keep its full-repository scan off
@@ -295,7 +404,7 @@ export async function repository(directory) {
     // Multiple tabs share one scan, rather than multiplying the open-file cap.
     if (counting) return counting;
     counting = (async () => {
-      const names = await files();
+      const { paths: names } = await files();
       const counts = {};
       let next = 0;
       await Promise.all(Array.from({ length: 4 }, async () => {
@@ -310,5 +419,5 @@ export async function repository(directory) {
     return counting;
   }
 
-  return { root, info, compare, file, lineCounts };
+  return { root, info, browse, commits, compare, file, lineCounts };
 }

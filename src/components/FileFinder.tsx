@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { autofocus, useListNavigation, onPlainClick } from "../lib/events";
 import { compareTreePaths, fuzzyScore } from "../lib/sort";
 import { MESSAGE_PATH } from "../types";
@@ -6,6 +6,8 @@ import { Modal } from "./Modal";
 
 export function FileFinder(props: {
   paths: string[];
+  // While the screen's files load; Enter waits for them.
+  loading: boolean;
   reviewed: string[];
   onSelect: (path: string) => void;
   fileHref: (path: string) => string;
@@ -29,6 +31,13 @@ export function FileFinder(props: {
     props.onClose();
   };
   const list = useListNavigation(matches, (match) => choose(match.path));
+  let openWhenLoaded = false;
+  createEffect(on(() => props.loading, (loading) => {
+    if (loading || !openWhenLoaded) return;
+    openWhenLoaded = false;
+    const match = matches()[list.active()];
+    if (match) choose(match.path);
+  }));
   return (
     <Modal
       backdropClass="finder-backdrop"
@@ -48,7 +57,12 @@ export function FileFinder(props: {
               setQuery(event.currentTarget.value);
               list.setActive(0);
             }}
-            onKeyDown={list.onKeyDown}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && props.loading) {
+                event.preventDefault();
+                openWhenLoaded = true;
+              } else list.onKeyDown(event);
+            }}
           />
           <kbd>F</kbd>
         </div>
@@ -73,7 +87,9 @@ export function FileFinder(props: {
               );
             }}
           </For>
-          <Show when={!matches().length}><p>No matching files.</p></Show>
+          <Show when={!matches().length}>
+            <p>{props.loading ? "Loading files…" : "No matching files."}</p>
+          </Show>
         </div>
         <div class="finder-footer">
           <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>

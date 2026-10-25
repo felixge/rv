@@ -63,8 +63,13 @@ async function reviewViewed(label) {
   await wait(`${heading}?.querySelector('.review-toggle')?.getAttribute('aria-label') === ${JSON.stringify(label)}`);
   await evaluate(`${heading}.querySelector('.review-toggle').click()`);
 }
-const tree = (name) =>
-  browser("find", "role", "treeitem", "click", "--name", name, "--exact");
+// Each screen loads its own files, so wait for the tree to list the item.
+const treeItem = (name) => `[...document.querySelectorAll('file-tree-container')].some(tree =>
+  tree.shadowRoot?.querySelector('[role=treeitem][aria-label=${JSON.stringify(name)}]'))`;
+async function tree(name) {
+  await wait(treeItem(name));
+  await browser("find", "role", "treeitem", "click", "--name", name, "--exact");
+}
 async function reviewScope(name) {
   if (!await evaluate("Boolean(document.querySelector('.review-popover'))"))
     await click("Review scope");
@@ -1119,6 +1124,8 @@ try {
     `${shadow}?.querySelector('pre')?.textContent.includes('percent / 100')`,
   );
   await click("Review scope");
+  // The menu loads its commits when it opens.
+  await wait("document.querySelectorAll('.review-options time').length === 3");
   assert.deepEqual(
     await evaluate(
       "Array.from(document.querySelectorAll('.review-options time')).map(e => e.textContent)",
@@ -1362,8 +1369,10 @@ try {
   assert.ok(!(await highlightedLines()).includes(4));
   await reviewScope("Uncommitted changes");
   await browser("click", ".comment:nth-child(4) .comment-top");
+  // The uncommitted diff also shows THRESHOLD = 100, as a deletion.
   await wait(
-    `${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`,
+    `document.querySelector('[aria-label="Review scope"]').textContent.includes('→') &&
+      ${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`,
   );
   assert.doesNotMatch(await codeText(), /THRESHOLD = 75/);
   assert.equal(
@@ -1401,7 +1410,8 @@ try {
   await wait("document.querySelectorAll('.comment').length === 3");
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('THRESHOLD = 100')`);
   await reviewRange();
-  assert.match(await evaluate("document.querySelector('[aria-label=\"Base revision\"]').textContent"), /Add shipping calculator/);
+  // Subjects appear once the menu has loaded its commits.
+  await wait("document.querySelector('[aria-label=\"Base revision\"]').textContent.includes('Add shipping calculator')");
   // Refresh restores the successful comparison, not the failed draft ref.
   await reviewScope("Uncommitted changes");
   await reviewScope("File Browser");
@@ -1439,6 +1449,7 @@ try {
   f.git("add", ".");
   f.git("commit", "-qm", "Clean checkpoint");
   await browser("reload");
+  // Enter waits for the File Browser's files when they are still loading.
   await wait(
     "document.querySelector('.sidebar-header')?.textContent.includes('Repository files')",
   );
@@ -1523,7 +1534,13 @@ try {
   await browser("fill", '[aria-label="Fuzzy find file"]', "long.ts");
   await browser("press", "Enter");
   await wait(`${shadow}?.querySelector('[data-line-type="change-deletion"]')`);
-  await evaluate("document.querySelector('.code-view').scrollTop = 700");
+  // A user scroll starts with input; without it, files that finish loading
+  // later keep re-anchoring the diff to the opened file.
+  await evaluate(`(() => {
+    const view = document.querySelector('.code-view');
+    view.dispatchEvent(new WheelEvent('wheel', { bubbles: true, composed: true }));
+    view.scrollTop = 700;
+  })()`);
   await browser("click", '[aria-label="View old"]');
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('export const line1 = 1;')`);
   await evaluate("document.querySelector('.code-view').scrollTop = 1000");
@@ -1592,13 +1609,13 @@ try {
   await browser("press", "Enter");
   await wait(`${heading}.querySelector('.file-path')?.textContent === 'long.ts'`);
   await browser("focus", '[aria-label="Review scope"]');
-  const infoBeforeGf = await evaluate(
-    "performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length",
+  const filesBeforeGf = await evaluate(
+    "performance.getEntriesByType('resource').filter(e => e.name.includes('/api/files?')).length",
   );
   await browser("press", "g");
   await browser("press", "f");
   await wait(
-    `performance.getEntriesByType('resource').filter(e => e.name.includes('/api/info?')).length > ${infoBeforeGf}`,
+    `performance.getEntriesByType('resource').filter(e => e.name.includes('/api/files?')).length > ${filesBeforeGf}`,
   );
   await wait("document.activeElement === document.querySelector('.code-view')");
   await evaluate("document.querySelector('.code-view').scrollTop = 0");
@@ -1606,26 +1623,31 @@ try {
   await wait("document.querySelector('.code-view').scrollTop > 0");
   console.log("PASS G F focuses the file viewer for arrow-key scrolling");
   await evaluate(`(() => {
-    window.gcInfoRequests = 0;
+    window.gcRequests = [];
     window.fetchBeforeGc = window.fetch;
     window.fetch = (...args) => {
-      if (String(args[0]).startsWith('/api/info?')) window.gcInfoRequests++;
+      window.gcRequests.push(String(args[0]).split('?')[0]);
       return window.fetchBeforeGc(...args);
     };
     for (const key of ['g', 'c', 'g', 'c'])
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
   })()`);
   await wait("document.querySelector('[aria-label=\"Review scope\"]')?.textContent.includes('Commit created after page load')");
-  assert.equal(await evaluate("window.gcInfoRequests"), 1);
+  // A commit loads its comparison and file contents, not other screens' data.
+  assert.deepEqual(
+    await evaluate("[...new Set(window.gcRequests)].filter(route => !['/api/file', '/api/state'].includes(route))"),
+    ["/api/compare"],
+  );
+  const comparesBeforeGc = await evaluate("window.gcRequests.filter(route => route === '/api/compare').length");
   await evaluate("new Promise(resolve => setTimeout(resolve, 200))");
   await browser("press", "g");
   await browser("press", "c");
-  await wait("window.gcInfoRequests === 2");
+  await wait(`window.gcRequests.filter(route => route === '/api/compare').length > ${comparesBeforeGc}`);
   await wait(`${shadow}?.querySelector('pre')?.textContent.includes('Commit created after page load')`);
   await evaluate("window.fetch = window.fetchBeforeGc");
   assert.equal((await comments()).length, 2);
   console.log(
-    "PASS focus causes zero background API calls; selecting or jumping to a view mode refreshes repository data; overlapping and sequential G C open the newest commit safely",
+    "PASS focus causes zero background API calls; jumping to a view loads only its data, fresh; overlapping and sequential G C open the newest commit safely",
   );
   await reviewCommit(f.second);
   await wait(
@@ -2061,7 +2083,8 @@ try {
   await f.write("src/long.ts", `${longLines.join("\n")}\n`);
   await f.write("src/other.ts", 'export const other = "const";\n');
   await browser("open", `${url}/?mode=files&path=src%2Flong.ts`);
-  await wait(`${heading}.querySelector('.file-path')?.textContent === 'src/long.ts'`);
+  // The heading can appear before the viewer mounts.
+  await wait(`${heading}.querySelector('.file-path')?.textContent === 'src/long.ts' && ${shadow}?.querySelector('pre')`);
   assert.equal(
     await evaluate(`${shadow}.textContent.includes('distantSearchTarget')`),
     false,

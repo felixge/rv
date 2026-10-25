@@ -1,7 +1,7 @@
 import { batch, createEffect, createSignal, For, on, Show } from "solid-js";
 import { autofocus, useOutsidePointerDown } from "../lib/events";
 import { commitAge } from "../lib/format";
-import type { Comparison, Info } from "../types";
+import type { Commit, Comparison } from "../types";
 import { CommitPicker } from "./CommitPicker";
 
 export function ReviewPalette(props: {
@@ -10,9 +10,12 @@ export function ReviewPalette(props: {
   mode: string;
   from: string;
   to: string;
-  commits: Info["commits"];
+  // Undefined until the review menu has loaded them.
+  commits: Commit[] | undefined;
   upstream: string;
   isGit: boolean;
+  // Opening the menu loads its commits.
+  onOpen: () => void;
   comparing: boolean;
   onFiles: () => void;
   onWorking: () => void;
@@ -26,21 +29,23 @@ export function ReviewPalette(props: {
   const [open, setOpen] = createSignal(false);
   const [rangeOpen, setRangeOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
+  const commits = () => props.commits || [];
   const current = () => {
     const { comparison } = props;
-    const selectedCommit = props.commits.find((commit) => commit.id === comparison.target);
     return props.tab === "files"
       ? "File Browser"
       : comparison.mode === "working"
         ? "Uncommitted changes"
         : comparison.mode === "commit"
-          ? selectedCommit?.subject || `Commit ${comparison.target.slice(0, 7)}`
+          // Git's subject: the first paragraph on one line.
+          ? comparison.message?.trim().split(/\n\s*\n/)[0].replace(/\s*\n\s*/g, " ") ||
+            `Commit ${comparison.target.slice(0, 7)}`
           : `${comparison.base.slice(0, 7)} → ${comparison.target.slice(0, 7)}`;
   };
   const matches = (value: string) => value.toLowerCase().includes(query().trim().toLowerCase());
-  const choices = () => props.commits.filter((commit) => matches(`${commit.id} ${commit.subject}`));
+  const choices = () => commits().filter((commit) => matches(`${commit.id} ${commit.subject}`));
   // The newest pushed commit is where the remote branch points.
-  const remoteTip = () => props.commits.find((commit) => commit.pushed)?.id;
+  const remoteTip = () => commits().find((commit) => commit.pushed)?.id;
   const scopes = () => [
     {
       title: "File Browser",
@@ -59,7 +64,7 @@ export function ReviewPalette(props: {
     {
       title: "Compare a range…",
       detail: "Choose base and target revisions",
-      available: props.commits.length > 0,
+      available: props.isGit,
       selected: props.tab === "changes" && props.comparison.mode === "range",
       run: () => setRangeOpen(true),
     },
@@ -69,13 +74,30 @@ export function ReviewPalette(props: {
   const customRef = () => {
     const ref = query().trim();
     return ref &&
-      !props.commits.some((commit) => commit.id === ref || commit.short === ref) &&
+      !commits().some((commit) => commit.id === ref || commit.short === ref) &&
       !scopes().some((scope) => matches(scope.title)) ? ref : "";
   };
+
+  function submit() {
+    const scope = visibleScopes()[0];
+    const commit = choices()[0];
+    const ref = customRef();
+    if (scope) scope.run();
+    else if (commit) choose(() => props.onCommit(commit.id));
+    else if (ref) choose(() => props.onCommit(ref));
+  }
+  // Enter before the first commits arrive must still match their subjects.
+  let submitWhenLoaded = false;
+  createEffect(on(() => props.commits, (loaded) => {
+    if (!loaded || !submitWhenLoaded) return;
+    submitWhenLoaded = false;
+    if (open()) submit();
+  }));
 
   useOutsidePointerDown(() => root, open, () => setOpen(false));
   createEffect(on(() => props.openRequest, (request) => {
     if (!request) return;
+    props.onOpen();
     setOpen(true);
     setRangeOpen(false);
     setQuery("");
@@ -110,6 +132,7 @@ export function ReviewPalette(props: {
         aria-expanded={open()}
         aria-haspopup="dialog"
         onClick={() => batch(() => {
+          if (!open()) props.onOpen();
           setOpen(!open());
           setRangeOpen(props.mode === "range" && props.tab === "changes");
           setQuery("");
@@ -136,12 +159,8 @@ export function ReviewPalette(props: {
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return;
                       event.preventDefault();
-                      const scope = visibleScopes()[0];
-                      const commit = choices()[0];
-                      const ref = customRef();
-                      if (scope) scope.run();
-                      else if (commit) choose(() => props.onCommit(commit.id));
-                      else if (ref) choose(() => props.onCommit(ref));
+                      if (props.isGit && !props.commits) submitWhenLoaded = true;
+                      else submit();
                     }}
                   />
                 </div>
@@ -160,6 +179,7 @@ export function ReviewPalette(props: {
                     )}
                   </For>
                   <Show when={choices().length || customRef()}><h2>Recent commits</h2></Show>
+                  <Show when={props.isGit && !props.commits}><p>Loading commits…</p></Show>
                   <For each={choices()}>
                     {(commit) => {
                       const selected = () => props.tab === "changes" &&
@@ -228,7 +248,7 @@ export function ReviewPalette(props: {
                       </button>
                     )}
                   </Show>
-                  <Show when={!visibleScopes().length && !choices().length && !customRef()}>
+                  <Show when={props.commits && !visibleScopes().length && !choices().length && !customRef()}>
                     <p>No matching review scope.</p>
                   </Show>
                 </div>
@@ -253,14 +273,14 @@ export function ReviewPalette(props: {
               <p>Choose base and target revisions.</p>
               <CommitPicker
                 label="Base"
-                commits={props.commits}
+                commits={commits()}
                 value={props.from}
                 onChange={(value) => props.onRangeDraft(value, props.to)}
               />
               <span class="range-arrow" aria-hidden="true">↓</span>
               <CommitPicker
                 label="Target"
-                commits={props.commits}
+                commits={commits()}
                 value={props.to}
                 onChange={(value) => props.onRangeDraft(props.from, value)}
               />

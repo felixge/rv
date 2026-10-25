@@ -2,7 +2,8 @@ import type { SavedState, Source } from "../types";
 
 // Deliberately no polling, focus revalidation, websocket, or filesystem watcher.
 // Responses are cached per URL for this page. A request with a new refresh
-// value supersedes the older cached responses of its route.
+// value supersedes the older cached responses of its route; responses
+// requested without one never go stale.
 const requests = new Map<string, { route: string; refresh?: string; promise: Promise<unknown> }>();
 export function api<T>(
   route: string,
@@ -13,7 +14,8 @@ export function api<T>(
   if (!request) {
     if (params.refresh !== undefined)
       for (const [key, cached] of requests)
-        if (cached.route === route && cached.refresh !== params.refresh) requests.delete(key);
+        if (cached.route === route && cached.refresh !== undefined && cached.refresh !== params.refresh)
+          requests.delete(key);
     const promise = fetch(url, { headers: { "X-Rv": "1" } }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
@@ -37,6 +39,7 @@ export async function patchState(state: SavedState, keepalive = false) {
 }
 
 export async function loadFile(path: string, ref: string, refresh: number): Promise<Source> {
-  const file = await api<Source>("file", { path, ref, refresh: String(refresh) });
-  return file && { ...file, cacheKey: JSON.stringify([refresh, ref, path]) };
+  // A file at a commit never changes; only working-tree files need refreshing.
+  const file = await api<Source>("file", ref ? { path, ref } : { path, ref, refresh: String(refresh) });
+  return file && { ...file, cacheKey: JSON.stringify([ref || refresh, path]) };
 }

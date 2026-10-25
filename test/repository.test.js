@@ -15,22 +15,26 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   t.after(f.cleanup);
   const repo = await repository(path.join(f.root, "src"));
   const info = await repo.info();
+  const { files, working } = await repo.browse();
   // Opening a subdirectory reviews only that directory, with scope-relative paths.
   assert.equal(repo.root, path.join(f.root, "src"));
   assert.equal(info.name, `${path.basename(f.root)}/src`);
-  assert.deepEqual(info.files, ["discount.ts", "shipping.ts"]);
+  assert.deepEqual(files, ["discount.ts", "shipping.ts"]);
   await f.write("src/ignored/secret.txt", "not in the browser");
-  assert.ok(!(await repo.info()).files.includes("ignored/secret.txt"));
-  assert.deepEqual(info.working.entries, [
+  assert.ok(!(await repo.browse()).files.includes("ignored/secret.txt"));
+  assert.deepEqual(working.entries, [
     { path: "discount.ts", status: "U", additions: 3, deletions: 0 },
     { path: "legacy.ts", status: "D", additions: 0, deletions: 1 },
     { path: "shipping.ts", status: "M", additions: 3, deletions: 3 },
   ]);
-  assert.equal(info.commits.length, 3); // commit history stays repository-wide
+  // Commit history stays repository-wide.
+  assert.equal((await repo.commits()).commits.length, 3);
   const commit = await repo.compare("commit", "", f.second);
   assert.deepEqual(commit.entries, [
     { path: "shipping.ts", status: "M", additions: 1, deletions: 1 },
   ]);
+  // Its place among recent commits keeps URLs HEAD-relative (HEAD~1).
+  assert.equal(commit.recent, 1);
   // The Files explorer shows total lines of code per current file,
   // keyed like the file list, so scoped runs use scope-relative paths.
   assert.ok(!("lineCounts" in info)); // startup does not count the whole checkout
@@ -40,18 +44,18 @@ test("working tree includes staged, unstaged, deleted and untracked changes, not
   // A staged deletion stays reviewable but absent from Files; recreating it
   // makes it a current file again, even while its deletion remains staged.
   f.git("add", "src/legacy.ts");
-  assert.ok(!(await repo.info()).files.includes("legacy.ts"));
+  assert.ok(!(await repo.browse()).files.includes("legacy.ts"));
   await f.write("src/legacy.ts", "recreated\n");
-  assert.ok((await repo.info()).files.includes("legacy.ts"));
+  assert.ok((await repo.browse()).files.includes("legacy.ts"));
   await rm(path.join(f.root, "src/legacy.ts"));
-  const oldFile = await repo.file("shipping.ts", info.working.base);
+  const oldFile = await repo.file("shipping.ts", working.base);
   const newFile = await repo.file("shipping.ts");
   assert.match(oldFile.contents, /THRESHOLD = 100/);
   assert.match(newFile.contents, /THRESHOLD = 75/); // staged
   assert.match(newFile.contents, /\? 6 : 14/); // unstaged
   assert.equal(await repo.file("legacy.ts"), null);
   assert.equal(
-    (await repo.file("legacy.ts", info.working.base)).contents,
+    (await repo.file("legacy.ts", working.base)).contents,
     "export const freeShipping = false;\n",
   );
 });
@@ -73,10 +77,10 @@ test("repository metadata larger than 16 MiB is not truncated", async (t) => {
     input: paths,
   });
   const repo = await repository(f.root);
-  const info = await repo.info();
+  const browse = await repo.browse();
   const counts = await repo.lineCounts();
-  const files = new Set(info.files);
-  const entries = new Map(info.working.entries.map((entry) => [entry.path, entry]));
+  const files = new Set(browse.files);
+  const entries = new Map(browse.working.entries.map((entry) => [entry.path, entry]));
   for (const name of names) {
     assert.ok(files.has(name));
     assert.equal(counts[name], null);
@@ -176,16 +180,15 @@ test("empty repositories work before the first commit, and refresh sees new chan
   f.git("checkout", "--orphan", "empty");
   f.git("rm", "-rf", "--cached", ".");
   const repo = await repository(f.root);
-  const info = await repo.info();
-  assert.deepEqual(info.commits, []);
+  assert.deepEqual((await repo.commits()).commits, []);
   assert.ok(
-    info.working.entries.some((entry) => entry.path === "src/shipping.ts"),
+    (await repo.compare()).entries.some((entry) => entry.path === "src/shipping.ts"),
   );
   f.git("add", ".");
   f.git("commit", "-qm", "First");
-  assert.deepEqual((await repo.info()).working.entries, []);
+  assert.deepEqual((await repo.compare()).entries, []);
   await f.write("new file.txt", "new\n");
-  assert.deepEqual((await repo.info()).working.entries, [
+  assert.deepEqual((await repo.compare()).entries, [
     { path: "new file.txt", status: "U", additions: 1, deletions: 0 },
   ]);
 });
@@ -293,7 +296,7 @@ test("HTTP is read-only, blocks cross-origin reads and serves the built UI", asy
     (await fetch(`${url}/api/info`, { method: "POST" })).status,
     405,
   );
-  const response = await fetch(`${url}/api/info`, {
+  const response = await fetch(`${url}/api/commits`, {
     headers: { "X-Rv": "1" },
   });
   assert.equal(response.headers.get("cache-control"), "no-store");
@@ -387,7 +390,7 @@ test("commits know whether a remote has them", async (t) => {
   t.after(f.cleanup);
   const repo = await repository(f.root);
   // Without remotes there is nothing to push to.
-  let info = await repo.info();
+  let info = await repo.commits();
   assert.equal(info.upstream, "");
   assert.ok(info.commits.every((commit) => !("pushed" in commit)));
   const remote = await mkdtemp(path.join(tmpdir(), "rv-remote-"));
@@ -395,11 +398,11 @@ test("commits know whether a remote has them", async (t) => {
   execFileSync("git", ["init", "-q", "--bare", remote]);
   f.git("remote", "add", "origin", remote);
   f.git("push", "-q", "origin", `${f.second}:refs/heads/main`);
-  info = await repo.info();
+  info = await repo.commits();
   assert.deepEqual(info.commits.map((commit) => commit.pushed), [false, true, true]);
   assert.equal(info.upstream, "remote"); // pushed, but no upstream branch set
   f.git("branch", "-q", "-u", "origin/main");
-  assert.equal((await repo.info()).upstream, "origin/main");
+  assert.equal((await repo.commits()).upstream, "origin/main");
 });
 
 test("ordinary folders and brand-new Git repositories with zero objects work", async (t) => {
@@ -408,15 +411,15 @@ test("ordinary folders and brand-new Git repositories with zero objects work", a
   await writeFile(path.join(root, "hello.txt"), "hello\n");
   const folder = await repository(root);
   assert.equal((await folder.info()).isGit, false);
-  assert.deepEqual((await folder.info()).files, ["hello.txt"]);
+  assert.deepEqual((await folder.browse()).files, ["hello.txt"]);
   execFileSync("git", ["-C", root, "init", "-q"]);
   const repo = await repository(root);
-  const info = await repo.info();
-  assert.deepEqual(info.commits, []);
-  assert.deepEqual(info.working.entries, [
+  assert.deepEqual((await repo.commits()).commits, []);
+  const working = await repo.compare();
+  assert.deepEqual(working.entries, [
     { path: "hello.txt", status: "U", additions: 1, deletions: 0 },
   ]);
-  assert.equal(await repo.file("hello.txt", info.working.base), null);
+  assert.equal(await repo.file("hello.txt", working.base), null);
   execFileSync("git", ["-C", root, "add", "hello.txt"]);
   assert.deepEqual((await repo.compare()).entries, [
     { path: "hello.txt", status: "A", additions: 1, deletions: 0 },

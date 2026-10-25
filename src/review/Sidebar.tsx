@@ -10,6 +10,7 @@ export function Sidebar(props: {
   tab: string;
   paths: string[];
   entries: Entry[];
+  loading: boolean;
   refresh: number;
   hasMessage: boolean;
   reviewed?: string[];
@@ -197,7 +198,9 @@ export function Sidebar(props: {
                 </Show>
                 <Show when={!done && !hasFiles()}>
                   <p class="sidebar-empty">
-                    {reviewedCount()
+                    {props.loading
+                      ? "Loading files…"
+                      : reviewedCount()
                       ? "All reviewed."
                       : props.tab === "files"
                         ? "No files yet."

@@ -46,6 +46,8 @@ import {
   MESSAGE_PATH,
   type Comment,
   type Comparison,
+  type Browse,
+  type CommitList,
   type Content,
   type Info,
   type SavedState,
@@ -63,15 +65,14 @@ function batched<T extends unknown[], R>(fn: (...args: T) => R) {
   return (...args: T) => batch(() => fn(...args));
 }
 
-export function Review(props: {
-  info: Info;
-  state: SavedState;
-  refreshInfo: () => Promise<Info>;
-}) {
+const NO_CHANGES: Comparison = { mode: "working", base: "", target: "", entries: [] };
+
+export function Review(props: { info: Info; state: SavedState }) {
   const info = () => props.info;
-  const { state, refreshInfo } = props;
-  const saved = { ...readPreferences(state.view), ...readLocation(untrack(info)) };
-  const [restoring, setRestoring] = createSignal(saved.mode !== "working");
+  const { state } = props;
+  const saved = { ...readPreferences(state.view), ...readLocation() };
+  // Until the first screen's data has loaded.
+  const [restoring, setRestoring] = createSignal(true);
   const [reviewed, setReviewed] = createSignal(state.reviewed || {});
   const [search, setSearch] = createSignal(saved.search);
   const [comments, setComments] = createSignal(state.comments || []);
@@ -79,7 +80,11 @@ export function Review(props: {
   const [mode, setMode] = createSignal(saved.mode);
   const [from, setFrom] = createSignal(saved.from);
   const [to, setTo] = createSignal(saved.to);
-  const [comparison, setComparison] = createSignal<Comparison>(untrack(info).working);
+  const [comparison, setComparison] = createSignal<Comparison>(NO_CHANGES);
+  // Each screen's data loads when that screen opens: the File Browser's files,
+  // and the review menu's commits.
+  const [browse, setBrowse] = createSignal<Browse>();
+  const [commitList, setCommitList] = createSignal<CommitList>();
   const compareLabel = createMemo(() => {
     const { mode, base, target } = comparison();
     return mode === "working"
@@ -164,7 +169,6 @@ export function Review(props: {
   const viewerScrollKey = createMemo(() => JSON.stringify(["viewer", contentKey(), viewerMode()]));
   let comparisonRequest = 0;
   let viewRefresh = 0;
-  let latestCommitPending = false;
   let reviewHistory: {
     scope: string;
     paths: string[];
@@ -186,14 +190,62 @@ export function Review(props: {
     });
   }
   onMount(() => {
-    if (saved.mode !== "working")
-      void compare(saved.mode, { to: saved.target, from: saved.base, restore: true }).finally(
-        () => setRestoring(false),
-      );
+    void (async () => {
+      if (saved.tab === "files") return loadBrowse(0);
+      if (saved.mode !== "auto")
+        return compare(saved.mode, { to: saved.target, from: saved.base, restore: true });
+      // Without a mode, open on uncommitted changes, else the latest commit;
+      // the File Browser is the fallback for repositories without either.
+      if (info().isGit) {
+        // Request the latest commit alongside, rather than after, uncommitted
+        // changes; compare() below reuses this request.
+        api<Comparison>("compare", { mode: "commit", from: "", to: "HEAD", refresh: "0" })
+          .catch(() => {});
+        setMode("working");
+        if ((await compare("working", { restore: true }))?.entries.length) return;
+        setMode("commit");
+        if (await compare("commit", { to: "HEAD", from: "", restore: true })) return;
+      }
+      batch(() => {
+        setError("");
+        setMode("working");
+        setComparison(NO_CHANGES);
+        setTab("files");
+      });
+      await loadBrowse(0);
+    })().finally(() => setRestoring(false));
   });
+  let browseRequest = 0;
+  async function loadBrowse(refresh: number) {
+    const id = ++browseRequest;
+    try {
+      const result = await api<Browse>("files", { refresh: String(refresh) });
+      if (id === browseRequest) setBrowse(result);
+    } catch (e) {
+      if (id === browseRequest) setError((e as Error).message);
+    }
+  }
+  let commitsRequest = 0;
+  function loadCommits() {
+    const id = ++commitsRequest;
+    api<CommitList>("commits", { refresh: String(id) }).then(
+      (result) => {
+        if (id !== commitsRequest) return;
+        batch(() => {
+          setCommitList(result);
+          // Range drafts start at the latest commit and its predecessor.
+          if (!to()) setTo(result.commits[0]?.id || "");
+          if (!from()) setFrom(result.commits[1]?.id || result.commits[0]?.id || "");
+        });
+      },
+      (e) => {
+        if (id === commitsRequest) setError((e as Error).message);
+      },
+    );
+  }
   const href = (overrides: Partial<ViewLocation> = {}) => viewHref({
     tab: tab(), comparison: comparison(), path: selected(), viewerMode: viewerMode(),
-    split: split(), expanded: expanded(), commits: info().commits,
+    split: split(), expanded: expanded(),
     ...overrides,
   });
   const fileHref = (path: string) => href({ path });
@@ -231,9 +283,11 @@ export function Review(props: {
   }));
   const paths = createMemo(() =>
     tab() === "files"
-      ? info().files
+      ? browse()?.files || []
       : comparison().entries.map((entry) => entry.path));
-  const entries = () => tab() === "files" ? info().working.entries : comparison().entries;
+  const entries = () => tab() === "files" ? browse()?.working.entries || [] : comparison().entries;
+  // Whether the current screen's file list is still loading.
+  const listLoading = () => restoring() || comparing() || (tab() === "files" && !browse());
   const isMessage = (path: string) =>
     tab() === "changes" && path === MESSAGE_PATH && comparison().mode === "commit";
   // The commit message shown on its own; the all-files diff includes it.
@@ -396,9 +450,8 @@ export function Review(props: {
     to: nextTo = to(),
     from: nextFrom = from(),
     restore = false,
-    info: refreshedInfo,
     refresh = restore ? 0 : ++viewRefresh,
-  }: { to?: string; from?: string; restore?: boolean; info?: Info; refresh?: number } = {}) {
+  }: { to?: string; from?: string; restore?: boolean; refresh?: number } = {}) {
     const id = ++comparisonRequest;
     batch(() => {
       if (!restore) setContentRevision(refresh);
@@ -411,17 +464,11 @@ export function Review(props: {
       clearSelection();
     });
     try {
-      const nextInfo = restore ? info() : refreshedInfo || await refreshInfo();
-      if (id !== comparisonRequest) return;
-      const result =
-        nextMode === "working"
-          ? nextInfo.working
-          : await api<Comparison>("compare", {
-              mode: nextMode,
-              from: nextFrom,
-              to: nextTo,
-              refresh: String(refresh),
-            });
+      const result = await api<Comparison>("compare", {
+        mode: nextMode,
+        ...(nextMode === "working" ? {} : { from: nextFrom, to: nextTo }),
+        refresh: String(refresh),
+      });
       if (id !== comparisonRequest) return;
       batch(() => {
         setComparison(result);
@@ -434,6 +481,7 @@ export function Review(props: {
         });
         setComparing(false);
       });
+      return result;
     } catch (e) {
       if (id === comparisonRequest) {
         batch(() => {
@@ -865,15 +913,9 @@ export function Review(props: {
       setLoaded(undefined);
       setSearch("");
     });
-    let nextInfo: Info;
-    try {
-      nextInfo = await refreshInfo();
-      if (id !== comparisonRequest) return;
-    } catch (e) {
-      if (id === comparisonRequest) setError((e as Error).message);
-      return;
-    }
     if (!comment.comparison) {
+      await loadBrowse(refresh);
+      if (id !== comparisonRequest) return;
       batch(() => {
         setTab("files");
         setComparing(false);
@@ -884,20 +926,17 @@ export function Review(props: {
     }
     try {
       const { mode: nextMode, base, target } = comment.comparison;
-      const result = nextMode === "working"
-        ? nextInfo.working
-        : await api<Comparison>("compare", {
-            mode: nextMode,
-            from: base,
-            to: target,
-            refresh: String(refresh),
-          });
+      const result = await api<Comparison>("compare", {
+        mode: nextMode,
+        ...(nextMode === "working" ? {} : { from: base, to: target }),
+        refresh: String(refresh),
+      });
       if (id !== comparisonRequest) return;
       batch(() => {
         setComparison(result);
         setMode(nextMode);
         setFrom(result.base);
-        setTo(result.target || nextInfo.commits[0]?.id || "");
+        if (result.target) setTo(result.target);
         setTab("changes");
         setComparing(false);
         setSelected(comment.path);
@@ -981,23 +1020,13 @@ export function Review(props: {
       if (value === "files") setComparing(false);
       const request = ++viewRefresh;
       setContentRevision(request);
-      void refreshInfo().catch((error) => {
-        if (request === viewRefresh)
-          setError((error as Error).message);
-      });
+      void loadBrowse(request);
     }
+    // A switch to changes is always followed by compare(), which keeps the
+    // selected file when the new comparison lists it.
     setTab(value);
     setSearch("");
     clearSelection();
-    if (
-      value === "changes" &&
-      !comparison().entries.some((entry) => entry.path === selected())
-    )
-      setSelected(
-        comparison().mode === "commit"
-          ? MESSAGE_PATH
-          : comparison().entries[0]?.path || "",
-      );
   });
 
   const resetReview = batched(() => {
@@ -1137,26 +1166,8 @@ export function Review(props: {
       changeTab("changes", false);
       void compare("working");
     } else if (command === "recent-commit") {
-      if (latestCommitPending) return;
-      latestCommitPending = true;
-      const refresh = ++viewRefresh;
-      setContentRevision(refresh);
-      void refreshInfo()
-        .then(async (nextInfo) => {
-          if (refresh !== viewRefresh) return;
-          const latest = nextInfo.commits[0]?.id;
-          if (!latest) return;
-          const comparing = batch(() => {
-            setTo(latest);
-            changeTab("changes", false);
-            return compare("commit", { to: latest, info: nextInfo, refresh });
-          });
-          await comparing;
-        })
-        .catch((error) => setError((error as Error).message))
-        .finally(() => {
-          latestCommitPending = false;
-        });
+      changeTab("changes", false);
+      void compare("commit", { to: "HEAD" });
     } else if (command === "comment" && content() && !notice() && (diffAll() || fileSource())) {
       setDialog("line");
     } else if (command === "toggle-reviewed") toggleReviewed();
@@ -1271,9 +1282,10 @@ export function Review(props: {
           mode={mode()}
           from={from()}
           to={to()}
-          commits={info().commits}
-          upstream={info().upstream}
+          commits={commitList()?.commits}
+          upstream={commitList()?.upstream || ""}
           isGit={info().isGit}
+          onOpen={loadCommits}
           comparing={comparing()}
           onFiles={() => changeTab("files")}
           onWorking={batched(() => {
@@ -1357,6 +1369,7 @@ export function Review(props: {
           paths={paths()}
           entries={entries()}
           refresh={contentRevision()}
+          loading={listLoading()}
           hasMessage={hasMessage()}
           reviewed={reviewedInView()}
           reviewScope={reviewScope()}
@@ -1422,7 +1435,7 @@ export function Review(props: {
               onPointerCancel={() => setLinePreview(undefined)}
             >
               <Switch>
-                <Match when={loading() || comparing() || restoring()}>
+                <Match when={loading() || listLoading()}>
                   <div class="empty">
                     <p>Loading…</p>
                   </div>
@@ -1589,6 +1602,7 @@ export function Review(props: {
         <Match when={dialog() === "finder"}>
           <FileFinder
             paths={hasMessage() ? [MESSAGE_PATH, ...paths()] : paths()}
+            loading={listLoading()}
             reviewed={reviewedInView() || []}
             onSelect={select}
             fileHref={fileHref}

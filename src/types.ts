@@ -11,20 +11,17 @@ export type Comparison = {
   target: string;
   entries: Entry[];
   message?: string;
+  // A commit's position among the commits the review menu lists, or -1.
+  recent?: number;
 };
 export const MESSAGE_PATH = "\0commit-message";
 export const MESSAGE_TREE_PATH = "\uE000Commit message";
 export type Source = { name: string; contents: string; notice?: string; cacheKey?: string } | null;
-export type Info = {
-  root: string;
-  name: string;
-  isGit: boolean;
-  branch: string;
-  files: string[];
-  working: Comparison;
-  commits: { id: string; short: string; subject: string; date: string; pushed?: boolean }[];
-  upstream: string;
-};
+export type Info = { root: string; name: string; isGit: boolean; branch: string };
+// The File Browser: repository files and their uncommitted changes.
+export type Browse = { files: string[]; working: Comparison };
+export type Commit = { id: string; short: string; subject: string; date: string; pushed?: boolean };
+export type CommitList = { commits: Commit[]; upstream: string };
 export type Comment = {
   id: string;
   path: string;

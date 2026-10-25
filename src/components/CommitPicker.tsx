@@ -1,12 +1,12 @@
 import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show } from "solid-js";
 import { autofocus, useListNavigation, useOutsidePointerDown } from "../lib/events";
 import { commitAge } from "../lib/format";
-import type { Info } from "../types";
+import type { Commit } from "../types";
 
 export function CommitPicker(props: {
   label: string;
   value: string;
-  commits: Info["commits"];
+  commits: Commit[];
   onChange: (value: string) => void;
 }) {
   const id = createUniqueId();

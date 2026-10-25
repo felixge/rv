@@ -1,4 +1,4 @@
-import type { Comparison, Info, ViewerMode } from "../types";
+import type { Comparison, ViewerMode } from "../types";
 
 const preferenceDefaults = {
   search: "",
@@ -17,27 +17,26 @@ export function readPreferences(stored: unknown) {
 
 // Navigation belongs to this tab's URL. The same query parameters serve CLI
 // entry points and in-app navigation.
-export function readLocation(info: Info) {
+export function readLocation() {
   const params = new URLSearchParams(location.search);
-  // Without a mode, open on uncommitted changes, else the latest commit; the
-  // File Browser is the fallback for repositories without either.
-  const urlMode = params.get("mode") ??
-    (info.working.entries.length ? "working" : info.commits.length ? "commit" : "files");
-  const changes = ["working", "commit", "range"].includes(urlMode);
+  // Without a mode, Review opens on uncommitted changes, else the latest
+  // commit, else the File Browser.
+  const urlMode = params.get("mode") ?? "auto";
+  const changes = ["working", "commit", "range", "auto"].includes(urlMode);
   const from = (changes && params.get("from")) || "";
   const to = (changes && params.get("to")) || (urlMode === "commit" ? "HEAD" : "");
   const view = params.get("view");
   return {
     tab: changes ? "changes" : "files",
     mode: changes ? urlMode : "working",
-    // Draft range picker values; base/target are the applied comparison.
-    from: from || info.commits[1]?.id || info.commits[0]?.id || "",
-    to: to || info.commits[0]?.id || "",
+    // Draft range picker values, defaulted once the review menu loads
+    // commits; base/target are the applied comparison.
+    from,
+    to,
     base: from,
     target: to,
     // Match the in-app pickers, which always open on the first change.
-    selected: params.get("path") ??
-      (urlMode === "working" ? info.working.entries[0]?.path || "" : ""),
+    selected: params.get("path") ?? "",
     viewerMode: (view === "old" || view === "new" ? view : "diff") as ViewerMode,
     split: params.get("split") === "true",
     expanded: params.get("expanded") === "true",
@@ -51,10 +50,9 @@ export type ViewLocation = {
   viewerMode: ViewerMode;
   split: boolean;
   expanded: boolean;
-  commits: Info["commits"];
 };
 
-export function viewHref({ tab, comparison, path, viewerMode, split, expanded, commits }: ViewLocation) {
+export function viewHref({ tab, comparison, path, viewerMode, split, expanded }: ViewLocation) {
   const url = new URL(location.href);
   for (const key of ["mode", "from", "to", "path", "view", "split", "expanded"])
     url.searchParams.delete(key);
@@ -63,9 +61,7 @@ export function viewHref({ tab, comparison, path, viewerMode, split, expanded, c
   if (tab === "changes") url.searchParams.set("view", viewerMode);
   if (tab === "changes" && comparison.target) {
     if (mode === "range") url.searchParams.set("from", comparison.base);
-    const recent = mode === "commit"
-      ? commits.findIndex((commit) => commit.id === comparison.target)
-      : -1;
+    const recent = mode === "commit" ? comparison.recent ?? -1 : -1;
     url.searchParams.set("to", recent < 0
       ? comparison.target
       : recent === 0 ? "HEAD" : `HEAD~${recent}`);

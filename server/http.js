@@ -100,6 +100,8 @@ export function createApp(repo, { allowRemote = false } = {}) {
         }
         const p = url.searchParams;
         if (url.pathname === "/api/info") return send(200, await repo.info());
+        if (url.pathname === "/api/files") return send(200, await repo.browse());
+        if (url.pathname === "/api/commits") return send(200, await repo.commits());
         if (url.pathname === "/api/line-counts") return send(200, await repo.lineCounts());
         if (url.pathname === "/api/compare")
           return send(

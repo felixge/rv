@@ -83,6 +83,9 @@ try {
     } else {
       await browser("find", "role", "link", "click", "--name", "Split", "--exact");
     }
+    // Each screen loads its own files.
+    await browser("wait", "--fn", `[...document.querySelectorAll('file-tree-container')]
+      .some(tree => tree.shadowRoot?.querySelector('[role=treeitem][aria-label="alpha.ts"]'))`);
     await browser("find", "role", "treeitem", "click", "--name", "alpha.ts", "--exact");
     await browser("wait", "--fn", "viewed().pre?.textContent.includes('alpha_0')");
     const cold = await evaluate(`(async () => [
@@ -142,6 +145,29 @@ try {
   console.log(`PASS rapid cold j/j/k/k/k navigation; slowest selection ${Math.round(Math.max(...rapid))} ms; no stale content`);
   assert.equal((await browser("errors")).errors?.length || 0, 0);
   console.log("PASS large-file j/k navigation renders the selected file in Files, Unified and Split");
+
+  // Switch between commits from the Review menu's recent commits.
+  await git("commit", "-qam", "Change values");
+  await browser("reload");
+  await browser("wait", "[aria-label='Find a file']");
+  const subjects = ["Initial files", "Change values", "Initial files", "Change values"];
+  for (const [visit, subject] of subjects.entries()) {
+    await browser("click", '[aria-label="Review scope"]');
+    // The menu loads its commits when it opens.
+    await browser("wait", "--fn", `[...document.querySelectorAll('.review-options .commit-subject')]
+      .some(e => e.textContent === ${JSON.stringify(subject)})`);
+    await evaluate("performance.clearResourceTimings()");
+    await browser("find", "role", "option", "click", "--name", subject);
+    await browser("wait", "--fn", `document.querySelector('.review-trigger strong')?.textContent === ${JSON.stringify(subject)} &&
+      [...document.querySelectorAll('diffs-container')].some(c => c.shadowRoot?.querySelector('pre span[style]'))`);
+    const [otherScreens, fileRequests] = await Promise.all(
+      [/\/api\/(info|files)\?/, /\/api\/file\?/].map(route => evaluate(`performance.getEntriesByType('resource')
+        .filter(e => ${route}.test(e.name)).length`)));
+    assert.equal(otherScreens, 0, "Commits must not load the header or File Browser data");
+    if (visit >= 2)
+      assert.equal(fileRequests, 0, "Revisited commits must reuse their file contents");
+  }
+  console.log("PASS recent-commit switches load only their comparison; revisits fetch no files");
 } finally {
   await browser("close").catch(() => {});
   if (server) await new Promise(resolve => server.close(resolve));
