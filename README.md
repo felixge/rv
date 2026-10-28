@@ -143,6 +143,18 @@ full hash). The three options are mutually exclusive.
 
 Use `rv --help` for directory, port, host, and browser options.
 
+### Update
+
+From this repository's checkout, run:
+
+```sh
+npm run update
+```
+
+This pulls the latest code, installs dependencies, and rebuilds rv. The linked
+`rv` command uses the updated build automatically. Restart any running rv servers
+when it finishes.
+
 ## Development
 
 ```sh

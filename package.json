@@ -15,6 +15,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "update": "git pull --ff-only && npm ci && npm run build",
     "build": "tsc --noEmit && vite build",
     "start": "node bin/rv.js",
     "test": "node --test test/*.test.js",
