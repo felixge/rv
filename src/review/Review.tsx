@@ -37,7 +37,7 @@ import { TextSearchBar, useTextSearch, type TextSearchSource } from "./TextSearc
 import { Sidebar } from "./Sidebar";
 import { CommentsPanel } from "./CommentsPanel";
 import { DiffFileHeader, FileHeading } from "./FileHeading";
-import { CopiedPromptDialog, LinePicker, PromptDialog } from "./Dialogs";
+import { CopiedPromptDialog, LinePicker, ManualCopyDialog } from "./Dialogs";
 import { useKeyboard } from "./useKeyboard";
 import { useViewerScroll } from "./useViewerScroll";
 import { useSavedState } from "./useSavedState";
@@ -135,9 +135,8 @@ export function Review(props: { info: Info; state: SavedState }) {
   const [generalDraft, setGeneralDraft] = createSignal("");
   const [editing, setEditing] = createSignal<string>();
   const [copied, setCopied] = createSignal(false);
-  const [copyError, setCopyError] = createSignal("");
   const [dialog, setDialog] =
-    createSignal<"commands" | "finder" | "line" | "prompt" | "copied" | null>(null);
+    createSignal<"commands" | "finder" | "line" | "copy-error" | "copied" | null>(null);
   const closeDialog = () => setDialog(null);
   const [reviewPickerRequest, setReviewPickerRequest] = createSignal(0);
   const [showFiles, setShowFiles] = createSignal(saved.showFiles);
@@ -225,23 +224,26 @@ export function Review(props: { info: Info; state: SavedState }) {
       if (id === browseRequest) setError((e as Error).message);
     }
   }
-  let commitsRequest = 0;
+  let commitsRefresh = 0;
+  let commitsRequest: Promise<CommitList | undefined> | undefined;
   function loadCommits() {
-    const id = ++commitsRequest;
-    api<CommitList>("commits", { refresh: String(id) }).then(
+    if (commitsRequest) return commitsRequest;
+    commitsRequest = api<CommitList>("commits", { refresh: String(++commitsRefresh) }).then(
       (result) => {
-        if (id !== commitsRequest) return;
         batch(() => {
           setCommitList(result);
           // Range drafts start at the latest commit and its predecessor.
           if (!to()) setTo(result.commits[0]?.id || "");
           if (!from()) setFrom(result.commits[1]?.id || result.commits[0]?.id || "");
         });
+        return result;
       },
       (e) => {
-        if (id === commitsRequest) setError((e as Error).message);
+        setError((e as Error).message);
+        return undefined;
       },
-    );
+    ).finally(() => { commitsRequest = undefined; });
+    return commitsRequest;
   }
   const href = (overrides: Partial<ViewLocation> = {}) => viewHref({
     tab: tab(), comparison: comparison(), path: selected(), viewerMode: viewerMode(),
@@ -998,17 +1000,14 @@ export function Review(props: { info: Info; state: SavedState }) {
   });
 
   async function copyPrompt() {
-    setCopyError("");
-    // Never open a dialog on failure.
     try {
       await copyText(prompt());
       setCopied(true);
       setDialog("copied");
     } catch {
       setCopied(false);
-      setCopyError(
-        "Clipboard blocked by your browser. Use Preview to select and copy the text.",
-      );
+      // Keep the text available without claiming success or offering to clear.
+      setDialog("copy-error");
     }
   }
 
@@ -1127,6 +1126,20 @@ export function Review(props: { info: Info; state: SavedState }) {
     select(reviewItems[next]);
   }
 
+  async function moveCommit(offset: number) {
+    const current = comparison();
+    if (tab() !== "changes" || current.mode !== "commit" || restoring() || comparing()) return;
+    const request = comparisonRequest;
+    const list = commitList() || await loadCommits();
+    // Loading the menu must not navigate over a newer scope selection.
+    if (!list || request !== comparisonRequest || tab() !== "changes" || comparison() !== current) return;
+    const index = list.commits.findIndex((commit) => commit.id === current.target);
+    // Follow the Review menu's newest-first order, without wrapping at either
+    // end or jumping from a custom revision outside the recent list.
+    const next = index < 0 ? undefined : list.commits[index + offset];
+    if (next) void compare("commit", { from: "", to: next.id });
+  }
+
   const pickLines = batched((start: number, end: number, side: "additions" | "deletions") => {
     const path = selected();
     const nextRange: SelectedLineRange = {
@@ -1158,6 +1171,8 @@ export function Review(props: { info: Info; state: SavedState }) {
       );
     } else if (command === "next-file") moveFile(1);
     else if (command === "previous-file") moveFile(-1);
+    else if (command === "next-commit") void moveCommit(-1);
+    else if (command === "previous-commit") void moveCommit(1);
     else if (command === "review-palette") setReviewPickerRequest((value) => value + 1);
     else if (command === "file-browser") {
       viewerFocusRequest = interactionVersion;
@@ -1174,7 +1189,6 @@ export function Review(props: { info: Info; state: SavedState }) {
     else if (command === "undo") undo();
     else if (command === "save-comment") saveComment();
     else if (command === "copy-prompt" && comments().length) void copyPrompt();
-    else if (command === "preview-prompt" && comments().length) setDialog("prompt");
     else if (command === "toggle-diff" && diffAll()) setSplit((value) => !value);
     else if (command === "toggle-wrap") setWrap((value) => !value);
     else if (command === "toggle-files") setShowFiles((value) => !value);
@@ -1558,8 +1572,7 @@ export function Review(props: { info: Info; state: SavedState }) {
             }),
             oldSide: range()!.side === "deletions",
           } : null}
-          errors={[copyError(), storageError()]}
-          onPreview={() => setDialog("prompt")}
+          errors={[storageError()]}
           onHide={() => setShowComments(false)}
           onResize={setCommentsWidth}
           hidden={!showComments()}
@@ -1588,10 +1601,9 @@ export function Review(props: { info: Info; state: SavedState }) {
         </span>
       </footer>
       <Switch>
-        <Match when={dialog() === "prompt"}>
-          <PromptDialog
+        <Match when={dialog() === "copy-error"}>
+          <ManualCopyDialog
             prompt={prompt()}
-            copyLabel={copyLabel()}
             onCopy={copyPrompt}
             onClose={closeDialog}
           />

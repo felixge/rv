@@ -9,9 +9,10 @@ type Shortcut = {
 export type Command =
   | "palette" | "find-viewed-file" | "next-text-match" | "previous-text-match"
   | "find-file" | "search-files" | "next-file" | "previous-file"
-  | "file-browser" | "recent-commit" | "uncommitted" | "review-palette"
+  | "file-browser" | "recent-commit" | "next-commit" | "previous-commit"
+  | "uncommitted" | "review-palette"
   | "comment" | "toggle-reviewed" | "undo" | "save-comment" | "copy-prompt"
-  | "preview-prompt" | "toggle-diff" | "toggle-wrap" | "toggle-files"
+  | "toggle-diff" | "toggle-wrap" | "toggle-files"
   | "toggle-comments" | "expand-diff" | "collapse-diff" | "refresh" | "cancel";
 export const shortcuts: Shortcut[] = [
   { command: "palette", bind: "?", keys: ["?", "or", "⌘", "K"], label: "Open command launcher", category: "General" },
@@ -24,6 +25,8 @@ export const shortcuts: Shortcut[] = [
   { command: "previous-file", bind: "k", keys: ["K"], label: "Previous file", category: "Navigate" },
   { command: "file-browser", bind: "gf", keys: ["G", "F"], label: "Open File Browser", category: "Navigate" },
   { command: "recent-commit", bind: "gc", keys: ["G", "C"], label: "Review most recent commit", category: "Navigate" },
+  { command: "next-commit", bind: "n", keys: ["N"], label: "Next commit (newer)", category: "Navigate" },
+  { command: "previous-commit", bind: "p", keys: ["P"], label: "Previous commit (older)", category: "Navigate" },
   { command: "uncommitted", bind: "gu", keys: ["G", "U"], label: "Review uncommitted changes", category: "Navigate" },
   { command: "review-palette", bind: "gr", keys: ["G", "R"], label: "Open review palette", category: "Navigate" },
   { command: "comment", bind: "l", keys: ["L"], label: "Comment on a line or range", category: "Review" },
@@ -31,7 +34,6 @@ export const shortcuts: Shortcut[] = [
   { command: "undo", bind: "u", keys: ["U"], label: "Undo last action", category: "Review" },
   { command: "save-comment", keys: ["⌘/Ctrl", "Enter"], label: "Save comment", category: "Review" },
   { command: "copy-prompt", bind: "y", keys: ["Y"], label: "Copy review prompt", category: "Review" },
-  { command: "preview-prompt", bind: "p", keys: ["P"], label: "Preview review prompt", category: "Review" },
   { command: "toggle-diff", bind: "v", keys: ["V"], label: "Toggle unified / split diff", category: "View" },
   { command: "toggle-wrap", bind: "w", keys: ["W"], label: "Toggle long line wrapping", category: "View" },
   { command: "toggle-files", bind: "b", keys: ["B"], label: "Toggle file browser", category: "View" },

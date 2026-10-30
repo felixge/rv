@@ -31,7 +31,10 @@ The **Review** menu switches between the File Browser (the repository at
 HEAD), uncommitted changes, recent commits, and a range of commits. Type a
 branch, tag, or hash to review any other revision. Ranges diff from the merge
 base, like a GitHub pull request, and a commit's message shows up as a file you
-can comment on.
+can comment on. While reviewing a single commit, <kbd>N</kbd> selects the next
+newer commit and <kbd>P</kbd> the previous older commit in the Review menu's
+recent history (up to 60 commits). Navigation stops at either end without wrapping;
+these shortcuts leave other review scopes and revisions outside that list alone.
 
 ![Switching from uncommitted changes to a commit, then to a range](docs/screenshots/scopes.gif)
 
@@ -58,11 +61,10 @@ edit it. General comments cover feedback that isn't tied to a file.
 ### Turn comments into a prompt
 
 **Copy Prompt** (<kbd>Y</kbd>) copies every comment as one prompt with exact
-file and line references. **Preview** (<kbd>P</kbd>) shows exactly what gets
-copied. After copying, rv offers to clear the review or keep the comments for
-later.
+file and line references, then shows the full copied text. rv offers to clear
+the review or keep the comments for later.
 
-![Previewing the prompt generated from review comments](docs/screenshots/prompt.png)
+![The prompt generated from review comments](docs/screenshots/prompt.png)
 
 ### Diff, Old, or New
 

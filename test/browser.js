@@ -1102,15 +1102,16 @@ try {
   await capture("working-split");
   await browser("hover", ".comment:nth-child(2)");
   assert.deepEqual(await highlightedLines(), [14]);
-  await click("Preview");
+  await browser("press", "y");
+  await browser("wait", ".copied-prompt-dialog");
   assert.equal(
     await evaluate(
-      "document.querySelector('[aria-label=\"Prompt text\"]').value",
+      "document.querySelector('[aria-label=\"Copied prompt\"]').value",
     ),
     "src/shipping.ts:6\nKeep the threshold at 100.\n\nsrc/shipping.ts:14\nKeep cents precise; round only when displaying the price.\n\nsrc/shipping.ts:13\nDocument why these rates changed.",
   );
   await capture("prompt");
-  await click("Close preview");
+  await click("Keep Comments");
   console.log(
     "PASS unified + split, staged + unstaged, old/new line coordinates, exact multi-comment prompt",
   );

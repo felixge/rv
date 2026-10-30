@@ -22,7 +22,6 @@ export function CommentsPanel(props: {
   // The composer for a new comment on a file or selected lines.
   newComment: { reference: string; file?: boolean; oldSide: boolean } | null;
   errors: string[];
-  onPreview: () => void;
   onHide: () => void;
   onResize: (width: number) => void;
   hidden: boolean;
@@ -47,15 +46,6 @@ export function CommentsPanel(props: {
           onClick={() => props.onHide()}
         >
           ›
-        </button>
-      </div>
-      <div class="comment-actions">
-        <button
-          class="text-button"
-          disabled={!props.comments.length}
-          onClick={() => props.onPreview()}
-        >
-          Preview
         </button>
       </div>
       <form

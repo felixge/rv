@@ -2,25 +2,24 @@ import { createSignal, Show } from "solid-js";
 import { Modal } from "../components/Modal";
 import { autofocus } from "../lib/events";
 
-export function PromptDialog(props: {
+export function ManualCopyDialog(props: {
   prompt: string;
-  copyLabel: string;
   onCopy: () => void;
   onClose: () => void;
 }) {
   return (
-    <Modal class="prompt-dialog" aria-label="Prompt preview" onClose={props.onClose}>
+    <Modal class="prompt-dialog" aria-label="Manual copy" onClose={props.onClose}>
       <div class="panel-heading">
-        <h2>Prompt preview</h2>
-        <button ref={autofocus} onClick={() => props.onClose()} aria-label="Close preview">
+        <h2>Copy prompt manually</h2>
+        <button ref={autofocus} onClick={() => props.onClose()} aria-label="Close manual copy">
           ✕
         </button>
       </div>
       <PromptText label="Prompt text" prompt={props.prompt} />
       <div class="dialog-footer">
-        <span>Exactly what gets copied.</span>
+        <span>Clipboard blocked. Select and copy the text above.</span>
         <button class="primary" onClick={() => props.onCopy()}>
-          {props.copyLabel}
+          Try again
         </button>
       </div>
     </Modal>
