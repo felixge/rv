@@ -145,6 +145,33 @@ full hash). The three options are mutually exclusive.
 
 Use `rv --help` for directory, port, host, and browser options.
 
+### Background review servers
+
+For agents and scripts, `ensure` starts a detached localhost server, prints
+its URL, and exits without opening a browser:
+
+```sh
+rv ensure [directory]      # restart and print the review URL
+rv ensure --commit HEAD    # review committed changes
+rv list                    # PID, URL, and opened directory
+rv stop /path/to/repo       # stop this directory's servers
+rv stop                    # stop all registered local servers
+```
+
+Every `ensure` gracefully restarts the directory's servers, including foreground
+instances, using the current rv installation. It preserves the port unless
+`--port` overrides it, and keeps comments and reviewed marks. The server
+survives the calling shell or agent; refresh existing tabs after a restart.
+
+The directory defaults to the current directory and resolves to its Git
+working-tree root. Subdirectories and symlinked paths share a server; separate
+worktrees and submodules get their own. Concurrent restarts are serialized.
+`list` and `stop` manage registered local servers, not remote ones.
+
+Runtime metadata and logs live outside the repository in rv's platform cache
+directory (`RV_CACHE_DIR` overrides it). Stale metadata and abandoned locks are
+recovered automatically; stopping a server does not clear review state.
+
 ### Update
 
 From this repository's checkout, run:
@@ -154,8 +181,19 @@ npm run update
 ```
 
 This pulls the latest code, installs dependencies, and rebuilds rv. The linked
-`rv` command uses the updated build automatically. Restart any running rv servers
-when it finishes.
+`rv` command uses the updated build automatically. Running server processes
+keep their loaded code until restarted, but the next `ensure` replaces the
+repository's servers using the current installation, preserving the port and
+review state:
+
+```sh
+rv ensure /path/to/repo     # restart this repository with the installed version
+```
+
+There is no version comparison or background upgrade mechanism. Repositories
+you do not `ensure` remain on their running code. Use `rv stop` after an update
+if you want to shut down all old instances immediately; start them again with
+`ensure` as needed.
 
 ## Development
 

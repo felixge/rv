@@ -15,7 +15,8 @@ import path from "node:path";
 // files from other versions are ignored, so rv starts from scratch.
 const VERSION = 3;
 
-function cacheDir() {
+export function cacheDir() {
+  if (process.env.RV_CACHE_DIR) return process.env.RV_CACHE_DIR;
   if (process.platform === "darwin")
     return path.join(os.homedir(), "Library", "Caches", "rv");
   if (process.platform === "win32")
@@ -32,7 +33,7 @@ function cacheDir() {
 
 // Encode an absolute path the way pi names its session directories: keep it
 // readable, but flat, by replacing separators with dashes.
-export function stateDir(root, base = process.env.RV_CACHE_DIR || cacheDir()) {
+export function stateDir(root, base = cacheDir()) {
   const encoded = `--${root.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
   return path.join(base, encoded);
 }

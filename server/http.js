@@ -37,7 +37,7 @@ const types = {
   ".svg": "image/svg+xml",
 };
 
-export function createApp(repo, { allowRemote = false } = {}) {
+export function createApp(repo, { allowRemote = false, instanceId } = {}) {
   // Serialize read/merge/write operations so simultaneous tabs cannot lose
   // unrelated sections (for example, preferences racing with a comment save).
   let stateWrite = Promise.resolve();
@@ -71,6 +71,8 @@ export function createApp(repo, { allowRemote = false } = {}) {
           req.headers["sec-fetch-site"] === "cross-site"
         )
           return send(403, { error: "Same-origin access only." });
+        if (url.pathname === "/api/instance")
+          return send(200, { root: repo.root, instanceId, pid: process.pid });
         if (url.pathname === "/api/state") {
           // Review state is a browser-independent cache on local disk,
           // served back so it survives restarts, ports and browsers.
@@ -99,7 +101,8 @@ export function createApp(repo, { allowRemote = false } = {}) {
           return send(405, { error: "Unsupported method." });
         }
         const p = url.searchParams;
-        if (url.pathname === "/api/info") return send(200, await repo.info());
+        if (url.pathname === "/api/info")
+          return send(200, { ...await repo.info(), instanceId, pid: process.pid });
         if (url.pathname === "/api/files") return send(200, await repo.browse());
         if (url.pathname === "/api/commits") return send(200, await repo.commits());
         if (url.pathname === "/api/line-counts") return send(200, await repo.lineCounts());
