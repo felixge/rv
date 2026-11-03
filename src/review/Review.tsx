@@ -994,6 +994,7 @@ export function Review(props: { info: Info; state: SavedState }) {
       text: generalDraft().trim(),
       general: true,
       context: "General",
+      ...(hasMessage() ? { commit: comparison().target } : {}),
     }]);
     setGeneralDraft("");
     setCopied(false);

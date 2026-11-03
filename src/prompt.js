@@ -9,8 +9,12 @@ export function reference(comment) {
 
 export function formatPrompt(comments) {
   return comments
-    .map((comment) => comment.general
-      ? comment.text.trim()
-      : `${reference(comment)}\n${comment.text.trim()}`)
+    .map((comment) => {
+      if (!comment.general) return `${reference(comment)}\n${comment.text.trim()}`;
+      // General comments left while reviewing a commit name it.
+      return comment.commit
+        ? `commit:${comment.commit}\n${comment.text.trim()}`
+        : comment.text.trim();
+    })
     .join("\n\n");
 }

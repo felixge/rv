@@ -379,8 +379,13 @@ test("prompt contains exact file, line and commit references with their comments
         general: true,
         text: "Run the full test suite before handing this back.",
       },
+      {
+        general: true,
+        commit: "def456",
+        text: " Split this commit. ",
+      },
     ]),
-    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nsrc/whole file.ts\nReview the module's structure.\n\nRun the full test suite before handing this back.",
+    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nsrc/whole file.ts\nReview the module's structure.\n\nRun the full test suite before handing this back.\n\ncommit:def456\nSplit this commit.",
   );
   assert.equal(formatPrompt([]), "");
 });

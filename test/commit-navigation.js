@@ -89,10 +89,10 @@ try {
   await browser("press", "Escape");
   await browser("press", "y");
   await browser("wait", ".copied-prompt-dialog");
-  assert.equal(await evaluate("document.querySelector('[aria-label=\"Copied prompt\"]').value"), "Keep this review feedback.");
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"Copied prompt\"]').value"), `commit:${f.second}\nKeep this review feedback.`);
   await unchanged("p", "n");
   await browser("find", "role", "button", "click", "--name", "Keep Comments", "--exact");
-  console.log("PASS Y copies and shows the full prompt; the standalone preview button and command are gone");
+  console.log("PASS Y copies and shows the full prompt, naming the commit of general comments; the standalone preview button and command are gone");
 
   await evaluate(`(() => {
     window.originalExecCommand = document.execCommand;
@@ -102,7 +102,7 @@ try {
   })()`);
   await browser("press", "y");
   await browser("wait", '[aria-label="Manual copy"]');
-  assert.equal(await evaluate("document.querySelector('[aria-label=\"Prompt text\"]').value"), "Keep this review feedback.");
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"Prompt text\"]').value"), `commit:${f.second}\nKeep this review feedback.`);
   assert.equal(await evaluate("document.querySelector('.prompt-dialog h2').textContent"), "Copy prompt manually");
   assert.equal(await evaluate("[...document.querySelectorAll('.prompt-dialog button')].some(b => b.textContent.trim() === 'Clear')"), false);
   await evaluate(`(() => {
