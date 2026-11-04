@@ -376,6 +376,15 @@ test("prompt contains exact file, line and commit references with their comments
         context: "not exported",
       },
       {
+        path: "\0commit-message",
+        commit: "abc123",
+        file: true,
+        start: 0,
+        end: 0,
+        text: "Reword the subject.",
+        context: "not exported",
+      },
+      {
         general: true,
         text: "Run the full test suite before handing this back.",
       },
@@ -385,7 +394,7 @@ test("prompt contains exact file, line and commit references with their comments
         text: " Split this commit. ",
       },
     ]),
-    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nsrc/whole file.ts\nReview the module's structure.\n\nRun the full test suite before handing this back.\n\ncommit:def456\nSplit this commit.",
+    "src/a.ts:7\nCheck the boundary.\n\nb.ts:12-15\nKeep this.\nRemove the fallback.\n\ncommit:abc123:message:3-4\nExplain why.\n\nsrc/whole file.ts\nReview the module's structure.\n\ncommit:abc123:message\nReword the subject.\n\nRun the full test suite before handing this back.\n\ncommit:def456\nSplit this commit.",
   );
   assert.equal(formatPrompt([]), "");
 });

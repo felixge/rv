@@ -1,9 +1,9 @@
 export function reference(comment) {
   if (comment.general) return "General comment";
-  if (comment.file) return comment.path;
   const path = comment.commit
     ? `commit:${comment.commit}:message`
     : comment.path;
+  if (comment.file) return path;
   return `${path}:${comment.start}${comment.end !== comment.start ? `-${comment.end}` : ""}`;
 }
 

@@ -1564,8 +1564,13 @@ export function Review(props: { info: Info; state: SavedState }) {
           onGeneralDraftChange={setGeneralDraft}
           onSaveGeneral={saveGeneralComment}
           newComment={editing() ? null : fileCommentPath() ? {
-            reference: fileCommentPath(),
+            reference: reference({
+              path: fileCommentPath(),
+              file: true,
+              commit: isMessage(fileCommentPath()) ? comparison().target : undefined,
+            }),
             file: true,
+            message: isMessage(fileCommentPath()),
             oldSide: false,
           } : range() && rangePath() ? {
             reference: reference({

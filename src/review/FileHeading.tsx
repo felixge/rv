@@ -101,9 +101,12 @@ export function FileHeading(props: {
       </div>
       <Show when={props.path && !props.summary}>
         <div class="file-actions">
-          <Show when={!props.title}>
-            <FileCommentButton path={props.path} disabled={props.reviewDisabled} onClick={props.onComment} />
-          </Show>
+          <FileCommentButton
+            path={props.path}
+            message={!!props.title}
+            disabled={props.reviewDisabled}
+            onClick={props.onComment}
+          />
           <ReviewToggle
             reviewed={props.reviewed}
             disabled={props.reviewDisabled}
@@ -159,9 +162,12 @@ export function DiffFileHeader(props: {
         <Show when={props.onRetry}>
           <button onClick={() => props.onRetry?.()} aria-label={`Retry loading ${props.path}`}>Retry</button>
         </Show>
-        <Show when={!props.title}>
-          <FileCommentButton path={props.path} disabled={props.reviewDisabled} onClick={props.onComment} />
-        </Show>
+        <FileCommentButton
+          path={props.path}
+          message={!!props.title}
+          disabled={props.reviewDisabled}
+          onClick={props.onComment}
+        />
         <ReviewToggle
           reviewed={props.reviewed}
           disabled={props.reviewDisabled}
@@ -174,14 +180,16 @@ export function DiffFileHeader(props: {
 
 function FileCommentButton(props: {
   path: string;
+  // Comments on the whole commit message instead of a file.
+  message: boolean;
   disabled: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       class="file-comment"
-      aria-label={`Comment on file ${props.path}`}
-      title="Comment on the whole file"
+      aria-label={props.message ? "Comment on commit message" : `Comment on file ${props.path}`}
+      title={props.message ? "Comment on the whole commit message" : "Comment on the whole file"}
       disabled={props.disabled}
       onClick={() => props.onClick()}
     >

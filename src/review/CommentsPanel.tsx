@@ -20,7 +20,7 @@ export function CommentsPanel(props: {
   onGeneralDraftChange: (draft: string) => void;
   onSaveGeneral: () => void;
   // The composer for a new comment on a file or selected lines.
-  newComment: { reference: string; file?: boolean; oldSide: boolean } | null;
+  newComment: { reference: string; file?: boolean; message?: boolean; oldSide: boolean } | null;
   errors: string[];
   onHide: () => void;
   onResize: (width: number) => void;
@@ -142,7 +142,7 @@ export function CommentsPanel(props: {
               <div class="comment-bottom">
                 <span>
                   {comment.context}
-                  {comment.file ? " · whole file" : comment.side === "deletions" ? " · old side" : ""}
+                  {comment.file ? comment.commit ? " · whole message" : " · whole file" : comment.side === "deletions" ? " · old side" : ""}
                 </span>
                 <button
                   onClick={() => props.onEdit(comment)}
@@ -168,7 +168,7 @@ export function CommentsPanel(props: {
                 props.onSave();
               }}
             >
-              <label for="comment-text">{newComment().file ? "New file comment" : "New comment"}</label>
+              <label for="comment-text">{newComment().message ? "New commit message comment" : newComment().file ? "New file comment" : "New comment"}</label>
               <code>{newComment().reference}</code>
               <Show when={newComment().oldSide}>
                 <small>Old side · line numbers before the change</small>
