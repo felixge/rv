@@ -266,6 +266,7 @@ try {
         hue: style.getPropertyValue('--repo-hue').trim(),
         colored: style.backgroundColor !== 'rgba(0, 0, 0, 0)',
         branch: document.querySelector('.branch')?.textContent,
+        pageTitle: document.title,
       };
     })()`),
     {
@@ -274,9 +275,28 @@ try {
       hue: String((repoNameHash >>> 0) % 360),
       colored: true,
       branch: "⑂ main",
+      pageTitle: `${repoName} — main`,
     },
   );
-  console.log("PASS top bar identifies the repository and branch with a name-derived color");
+  console.log("PASS top bar and page title identify the repository and branch");
+
+  try {
+    f.git("switch", "-qc", "feature/browser-title");
+    await browser("reload");
+    await wait("document.querySelector('.file-tree')");
+    assert.equal(await evaluate("document.title"), `${repoName} — feature/browser-title`);
+
+    f.git("switch", "--detach", "-q");
+    await browser("reload");
+    await wait("document.querySelector('.file-tree')");
+    assert.equal(await evaluate("document.title"), `${repoName} — ${f.third.slice(0, 7)}`);
+  } finally {
+    f.git("switch", "-q", "main");
+  }
+  await browser("reload");
+  await wait("document.querySelector('.file-tree')");
+  assert.equal(await evaluate("document.title"), `${repoName} — main`);
+  console.log("PASS page title follows branch changes and detached HEAD after refresh");
 
   // A modified click opens the exact file/scope without navigating its source.
   // Check actual tabs and rendered contents, not just a mocked window.open.

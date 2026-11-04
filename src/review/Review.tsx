@@ -69,6 +69,9 @@ const NO_CHANGES: Comparison = { mode: "working", base: "", target: "", entries:
 
 export function Review(props: { info: Info; state: SavedState }) {
   const info = () => props.info;
+  createEffect(() => {
+    document.title = [info().name, info().branch].filter(Boolean).join(" — ");
+  });
   const { state } = props;
   const saved = { ...readPreferences(state.view), ...readLocation() };
   // Until the first screen's data has loaded.
