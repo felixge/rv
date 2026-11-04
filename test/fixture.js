@@ -1,11 +1,13 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 export async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "rv-review-"));
+  // repository() canonicalizes its root, so resolve symlinked temp
+  // directories (macOS: /var -> /private/var) for paths to compare equal.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "rv-review-")));
   const now = Date.now();
   const dates = [2 * 86400, 3 * 3600, 10 * 60].map((seconds) =>
     new Date(now - seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
